@@ -1,0 +1,16 @@
+# Unity
+/game/[Ll]ibrary/
+/game/[Tt]emp/
+/game/[Oo]bj/
+/game/[Bb]uild/
+/game/[Bb]uilds/
+/game/[Ll]ogs/
+/game/[Uu]ser[Ss]ettings/
+/game/*.csproj
+/game/*.sln
+/game/.vs/
+/game/.idea/
+# tools / scratch
+/tools/
+/ripped/
+.DS_Store
