@@ -1,0 +1,46 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  tags:
+  - bode
+  - zombiespawn
+  - zumbi
+  - itemspawn
+  - deadbody
+  - grounditem
+  - playerspawn
+  - bagspawn
+  - 
+  Builtin Layer 0: Default
+  Builtin Layer 1: TransparentFX
+  Builtin Layer 2: Ignore Raycast
+  Builtin Layer 3:
+  Builtin Layer 4: Water
+  Builtin Layer 5:
+  Builtin Layer 6:
+  Builtin Layer 7:
+  User Layer 8: mapgeometry
+  User Layer 9: player
+  User Layer 10: collider
+  User Layer 11: zumbi
+  User Layer 12: items
+  User Layer 13: playercollider
+  User Layer 14: deadcollider
+  User Layer 15: grounditems
+  User Layer 16: personalcollider
+  User Layer 17: zspawns
+  User Layer 18: ispawn
+  User Layer 19: playerspawn
+  User Layer 20: playerdead
+  User Layer 21: shotcollider
+  User Layer 22: ammobox
+  User Layer 23: suplybag
+  User Layer 24: bagspawn
+  User Layer 25: navarea
+  User Layer 26: navpassage
+  User Layer 27: ladder
+  User Layer 28: mapsign
+  User Layer 29: trigerstuff
+  User Layer 30: roda
+  User Layer 31:
