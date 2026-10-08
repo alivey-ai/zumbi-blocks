@@ -1,0 +1,306 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!90 &9000000
+Avatar:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_Name: TommyGunAvatar
+  m_AvatarSize: 816
+  m_Avatar:
+    m_Skeleton:
+      data:
+        m_Node:
+        - m_ParentId: -1
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        - m_ParentId: 0
+          m_AxesId: -1
+        m_ID: 9e04d887861ecc902a7f1351902e1ac8061e1dbfa58b792133bb7e5689ea77cf1fda70b8bc3972628c2772da
+        m_AxesArray: []
+    m_SkeletonPose:
+      data:
+        m_X:
+        - t:
+            x: 0
+            y: 0
+            z: 0
+            w: 0
+          q:
+            x: 0
+            y: 0
+            z: 0
+            w: 1
+          s:
+            x: 1
+            y: 1
+            z: 1
+            w: 1
+        - t:
+            x: -0.010171592
+            y: 0
+            z: 0
+            w: 0
+          q:
+            x: -0.7071069
+            y: 0
+            z: -0
+            w: 0.70710677
+          s:
+            x: 1
+            y: 1
+            z: 1
+            w: 1
+        - t:
+            x: 0.8746882
+            y: 2.873298
+            z: 2.6045703E-07
+            w: 0
+          q:
+            x: -0.7071069
+            y: 0
+            z: -0
+            w: 0.70710677
+          s:
+            x: 0.12390217
+            y: 0.175379
+            z: 0.12390217
+            w: 1
+        - t:
+            x: -1.885926
+            y: 2.6586306
+            z: 8.884054E-08
+            w: 0
+          q:
+            x: -0.7071069
+            y: 0
+            z: -0
+            w: 0.70710677
+          s:
+            x: 0.20027065
+            y: 0.20027065
+            z: 0.20027065
+            w: 1
+        - t:
+            x: -3.7536721
+            y: 1.314936
+            z: 1.1919546E-07
+            w: 0
+          q:
+            x: -0.7071069
+            y: 0
+            z: -0
+            w: 0.70710677
+          s:
+            x: 0.6493728
+            y: 0.15330936
+            z: 0.6493728
+            w: 1
+        - t:
+            x: -1.3530328
+            y: 3.1169293
+            z: -0.0034268212
+            w: 0
+          q:
+            x: -0.7071069
+            y: 0
+            z: -0
+            w: 0.70710677
+          s:
+            x: 0.10103485
+            y: 0.10103485
+            z: 0.10103485
+            w: 1
+        - t:
+            x: -1.7397442
+            y: 3.0700722
+            z: -0.0071731675
+            w: 0
+          q:
+            x: -0.7071069
+            y: 0
+            z: -0
+            w: 0.70710677
+          s:
+            x: 0.056995068
+            y: 0.056995068
+            z: 0.056995068
+            w: 1
+        - t:
+            x: 4.23506
+            y: 2.9980335
+            z: -0.0060376236
+            w: 0
+          q:
+            x: -0.7071069
+            y: 0
+            z: -0
+            w: 0.70710677
+          s:
+            x: 0.047951564
+            y: 0.047951564
+            z: 0.047951564
+            w: 1
+        - t:
+            x: 3.7569456
+            y: 2.6650245
+            z: -0.0060377093
+            w: 0
+          q:
+            x: -0.7071069
+            y: 0
+            z: -0
+            w: 0.70710677
+          s:
+            x: 0.17915215
+            y: 0.17915215
+            z: 0.17915215
+            w: 1
+        - t:
+            x: 4.04915
+            y: 2.8504095
+            z: -0.0060374667
+            w: 0
+          q:
+            x: 0.5000001
+            y: 0.49999997
+            z: -0.49999994
+            w: -0.5
+          s:
+            x: 0.09964054
+            y: 0.09964054
+            z: 0.09964054
+            w: 1
+        - t:
+            x: 0.81536466
+            y: 1.912988
+            z: -0.00603781
+            w: 0
+          q:
+            x: 0.5000001
+            y: 0.49999997
+            z: -0.49999994
+            w: -0.5
+          s:
+            x: 0.83195084
+            y: 0.83195084
+            z: 0.20238838
+            w: 1
+    m_Human:
+      data:
+        m_RootX:
+          t:
+            x: 0
+            y: 0
+            z: 0
+            w: 0
+          q:
+            x: 0
+            y: 0
+            z: 0
+            w: 1
+          s:
+            x: 1
+            y: 1
+            z: 1
+            w: 1
+        m_Skeleton:
+          data:
+            m_Node: []
+            m_ID:
+            m_AxesArray: []
+        m_SkeletonPose:
+          data:
+            m_X: []
+        m_LeftHand:
+          data:
+            m_HandBoneIndex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        m_RightHand:
+          data:
+            m_HandBoneIndex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        m_Handles: []
+        m_ColliderArray: []
+        m_HumanBoneIndex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        m_HumanBoneMass:
+        - 0.14545456
+        - 0.12121213
+        - 0.12121213
+        - 0.048484854
+        - 0.048484854
+        - 0.009696971
+        - 0.009696971
+        - 0.030303033
+        - 0.2909091
+        - 0.012121214
+        - 0.048484854
+        - 0.006060607
+        - 0.006060607
+        - 0.024242427
+        - 0.024242427
+        - 0.01818182
+        - 0.01818182
+        - 0.006060607
+        - 0.006060607
+        - 0.0024242427
+        - 0.0024242427
+        - 0
+        - 0
+        - 0
+        m_ColliderIndex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        m_Scale: 1
+        m_ArmTwist: 0.5
+        m_ForeArmTwist: 0.5
+        m_UpperLegTwist: 0.5
+        m_LegTwist: 0.5
+        m_ArmStretch: 0.05
+        m_LegStretch: 0.05
+        m_FeetSpacing: 0
+        m_HasLeftHand: 0
+        m_HasRightHand: 0
+    m_HumanSkeletonIndexArray:
+    m_RootMotionBoneIndex: -1
+    m_RootMotionBoneX:
+      t:
+        x: 0
+        y: 0
+        z: 0
+        w: 0
+      q:
+        x: 0
+        y: 0
+        z: 0
+        w: 1
+      s:
+        x: 1
+        y: 1
+        z: 1
+        w: 1
+  m_TOS:
+    561613733: Cube_004
+    1360232234: Cube_001
+    1451146035: Cube_005
+    1651653052: Cylinder
+    2279081118: TommyGun
+    2429296262: Cube
+    3094403615: Cube_007
+    3206356486: Cube_003
+    3357159056: Cube_002
+    3480742537: Cube_006
+    3664914316: Cylinder_001

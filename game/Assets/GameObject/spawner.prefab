@@ -1,0 +1,121 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &147589
+GameObject:
+  serializedVersion: 4
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 100100000}
+  m_Component:
+  - 4: {fileID: 479954}
+  - 114: {fileID: 11409266}
+  - 148: {fileID: 14805782}
+  m_Layer: 0
+  m_Name: spawner
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &479954
+Transform:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 100100000}
+  m_GameObject: {fileID: 147589}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+--- !u!114 &11409266
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 100100000}
+  m_GameObject: {fileID: 147589}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a48559aac1a48200785ff04d5d340e9b, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  timetospawn: 2
+  playerprefab: {fileID: 448483, guid: f1bb0fc0131e79c479c00fa4f67c25c6, type: 2}
+  state: 1
+  scenecontrol: {fileID: 0}
+  gamecontrol: {fileID: 0}
+  playerobj: {fileID: 0}
+  canspawn: 0
+  conter: 0
+  guiskin: {fileID: 11400000, guid: 142644dde9e8c7f4b87b33be34a84095, type: 2}
+  guiskin2: {fileID: 11400000, guid: d3ad93c79f0611446ac826b000adfed2, type: 2}
+  guiSlist: {fileID: 11400000, guid: ca95fd14e1869c84c9329acafe3f866a, type: 2}
+  otherfont: {fileID: 11400000, guid: 087d74e192fb60249a4095537b655009, type: 2}
+  chatfont: {fileID: 11400000, guid: e1d28a811f7bbb64abd4eef6da009ce9, type: 2}
+  guiInv: {fileID: 11400000, guid: 8504f2f34d0bc00438284772f4fc2904, type: 2}
+  guiInv2: {fileID: 11400000, guid: bceb5d57f66a17845ac3538a1143878d, type: 2}
+  cubesprite: {fileID: 2800000, guid: fcc62ffc5f151094db73b33752e7a405, type: 3}
+  blackcube: {fileID: 2800000, guid: 3ce284c865a63f043946b17f04031ab3, type: 3}
+  inv3_sign:
+  - {fileID: 2800000, guid: a1aa098cd000b3149b5ce6bdf9c53c00, type: 3}
+  - {fileID: 2800000, guid: 346954d3498e8b44383bcfc1b12831aa, type: 3}
+  - {fileID: 2800000, guid: 2d4bb37cb5ef94d418960dbf1b55de9d, type: 3}
+  justlogged: 1
+  playername:
+  mousesense: 0
+  autoaim: 0
+  autoreload: 0
+  matchcontroller: {fileID: 0}
+  matchdata: {fileID: 0}
+  myid: 0
+  spawns: []
+  inve: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  money: 0
+  kills: 0
+  spawnei: 0
+  BM_alpha: 0
+  BM_message:
+  chat:
+  chatbool: 1
+  specplayers: []
+  spectarget: 0
+  specdist: 4
+  camfix: {x: 0, y: 0, z: 0}
+  my_beard: -1
+  my_beardcolor: 0
+  my_shirtcolor: 0
+  my_skincolor: 0
+  chatcommands:
+  - '/kick '
+  - '/ban '
+  - '/say '
+  - '/password '
+  - '/unban '
+  send_cmd: -1
+  parsefrase:
+  onmouse: -1
+  mouseup: 0
+--- !u!148 &14805782
+NetworkView:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 100100000}
+  m_GameObject: {fileID: 147589}
+  m_Enabled: 1
+  m_StateSynchronization: 0
+  m_Observed: {fileID: 479954}
+  m_ViewID:
+    m_ID: 0
+    m_Type: 0
+--- !u!1001 &100100000
+Prefab:
+  serializedVersion: 2
+  m_ObjectHideFlags: 1
+  m_Modification:
+    m_TransformParent: {fileID: 0}
+    m_Modifications: []
+    m_RemovedComponents: []
+  m_ParentPrefab: {fileID: 0}
+  m_RootGameObject: {fileID: 147589}
+  m_IsPrefabParent: 1
+  m_IsExploded: 0

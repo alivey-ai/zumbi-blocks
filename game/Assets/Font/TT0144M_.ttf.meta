@@ -1,0 +1,20 @@
+fileFormatVersion: 2
+guid: 2b0cd8077ada90c4c8f1ae6cb08d1df3
+timeCreated: 1791500517
+licenseType: Free
+TrueTypeFontImporter:
+  serializedVersion: 2
+  name:
+  fontSize: 16
+  forceTextureCase: -2
+  characterSpacing: 1
+  characterPadding: 0
+  includeFontData: 1
+  use2xBehaviour: 0
+  fontNames:
+  - Futura Md BT
+  customCharacters:
+  fontRenderingMode: 0
+  output:
+    hasEmptyFontData: 0
+  userData:

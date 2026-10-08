@@ -1,0 +1,1747 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!29 &25
+SceneSettings:
+  m_ObjectHideFlags: 0
+  m_PVSData:
+  m_QueryMode: 1
+  m_PVSObjectsArray: []
+  m_PVSPortalsArray: []
+  m_OcclusionBakeSettings:
+    viewCellSize: 0
+    bakeMode: 0
+    memoryUsage: 0
+--- !u!104 &29
+RenderSettings:
+  m_Fog: 0
+  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  m_FogMode: 3
+  m_FogDensity: 0.01
+  m_LinearFogStart: 0
+  m_LinearFogEnd: 300
+  m_AmbientLight: {r: 0.30147058, g: 0.30147058, b: 0.30147058, a: 1}
+  m_SkyboxMaterial: {fileID: 2100000, guid: b4dd9b182b42c034c99d47ecca1875bf, type: 2}
+  m_HaloStrength: 0.5
+  m_FlareStrength: 1
+  m_HaloTexture: {fileID: 0}
+  m_SpotCookie: {fileID: 0}
+  m_ObjectHideFlags: 0
+--- !u!127 &32
+HaloManager:
+  m_ObjectHideFlags: 0
+--- !u!157 &33
+LightmapSettings:
+  m_ObjectHideFlags: 0
+  m_LightProbes: {fileID: 0}
+  m_Lightmaps: []
+  m_LightmapsMode: 1
+  m_BakedColorSpace: 0
+  m_UseDualLightmapsInForward: 0
+  m_LightmapEditorSettings:
+    m_Resolution: 2
+    m_LastUsedResolution: 0
+    m_TextureWidth: 1024
+    m_TextureHeight: 1024
+    m_BounceBoost: 1
+    m_BounceIntensity: 1
+    m_SkyLightColor: {r: 0.86, g: 0.93, b: 1, a: 1}
+    m_SkyLightIntensity: 0
+    m_Quality: 0
+    m_Bounces: 1
+    m_FinalGatherRays: 1000
+    m_FinalGatherContrastThreshold: 0.05
+    m_FinalGatherGradientThreshold: 0
+    m_FinalGatherInterpolationPoints: 15
+    m_AOAmount: 0
+    m_AOMaxDistance: 1
+    m_AOContrast: 1
+    m_LODSurfaceMappingDistance: 1
+    m_Padding: 2
+    m_TextureCompression: 1
+    m_LockAtlas: 0
+--- !u!196 &34
+NavMeshSettings:
+  m_ObjectHideFlags: 0
+  m_BuildSettings:
+    agentRadius: 0.5
+    agentHeight: 2
+    agentSlope: 45
+    agentClimb: 0.4
+    ledgeDropHeight: 0
+    maxJumpAcrossDistance: 0
+    accuratePlacement: 0
+    minRegionArea: 2
+    widthInaccuracy: 0
+    heightInaccuracy: 0
+  m_NavMesh: {fileID: 0}
+--- !u!1 &18
+GameObject:
+  serializedVersion: 4
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_Component:
+  - 4: {fileID: 21}
+  - 108: {fileID: 30}
+  m_Layer: 0
+  m_Name: soldomenu
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!1 &19
+GameObject:
+  serializedVersion: 4
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_Component:
+  - 4: {fileID: 22}
+  - 20: {fileID: 24}
+  - 92: {fileID: 28}
+  - 124: {fileID: 31}
+  - 81: {fileID: 27}
+  - 45: {fileID: 26}
+  - 114: {fileID: 35}
+  m_Layer: 0
+  m_Name: Main Camera
+  m_TagString: MainCamera
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!1 &20
+GameObject:
+  serializedVersion: 4
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_Component:
+  - 4: {fileID: 23}
+  - 114: {fileID: 84}
+  - 114: {fileID: 37}
+  - 114: {fileID: 38}
+  - 114: {fileID: 47}
+  - 114: {fileID: 36}
+  - 114: {fileID: 39}
+  - 114: {fileID: 40}
+  - 114: {fileID: 41}
+  - 114: {fileID: 42}
+  - 114: {fileID: 43}
+  - 114: {fileID: 44}
+  - 114: {fileID: 45}
+  - 114: {fileID: 46}
+  - 114: {fileID: 48}
+  - 114: {fileID: 49}
+  - 114: {fileID: 50}
+  - 114: {fileID: 51}
+  - 114: {fileID: 52}
+  - 114: {fileID: 53}
+  - 114: {fileID: 54}
+  - 114: {fileID: 57}
+  - 114: {fileID: 56}
+  - 114: {fileID: 55}
+  - 114: {fileID: 58}
+  - 114: {fileID: 59}
+  - 114: {fileID: 60}
+  - 114: {fileID: 61}
+  - 114: {fileID: 62}
+  - 114: {fileID: 63}
+  - 114: {fileID: 64}
+  - 114: {fileID: 65}
+  - 114: {fileID: 66}
+  - 114: {fileID: 67}
+  - 114: {fileID: 68}
+  - 114: {fileID: 69}
+  - 114: {fileID: 70}
+  - 114: {fileID: 71}
+  - 114: {fileID: 72}
+  - 114: {fileID: 73}
+  - 114: {fileID: 74}
+  - 114: {fileID: 75}
+  - 114: {fileID: 76}
+  - 114: {fileID: 78}
+  - 114: {fileID: 77}
+  - 114: {fileID: 79}
+  - 114: {fileID: 80}
+  - 114: {fileID: 81}
+  - 114: {fileID: 82}
+  - 114: {fileID: 83}
+  m_Layer: 0
+  m_Name: gamecontroler
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &21
+Transform:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 18}
+  m_LocalRotation: {x: 0.13301575, y: -0.3488095, z: 0.06068053, w: 0.92571956}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+--- !u!4 &22
+Transform:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 19}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+--- !u!4 &23
+Transform:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+--- !u!20 &24
+Camera:
+  serializedVersion: 2
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 19}
+  m_Enabled: 1
+  m_ClearFlags: 1
+  m_BackGroundColor: {r: 0, g: 0, b: 0, a: 0}
+  m_NormalizedViewPortRect:
+    serializedVersion: 2
+    x: 0
+    y: 0
+    width: 1
+    height: 1
+  near clip plane: 0.01
+  far clip plane: 1000
+  field of view: 70
+  orthographic: 0
+  orthographic size: 100
+  m_Depth: -1
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4026531839
+  m_RenderingPath: -1
+  m_TargetTexture: {fileID: 0}
+  m_HDR: 0
+--- !u!45 &26
+Skybox:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 19}
+  m_Enabled: 0
+  m_CustomSkybox: {fileID: 2100000, guid: 9bfe41d0c98a8654db00f50b640db216, type: 2}
+--- !u!81 &27
+AudioListener:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 19}
+  m_Enabled: 1
+--- !u!92 &28
+GUILayer:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 19}
+  m_Enabled: 1
+--- !u!108 &30
+Light:
+  serializedVersion: 3
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 18}
+  m_Enabled: 1
+  m_Type: 1
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Intensity: 0.5
+  m_Range: 10
+  m_SpotAngle: 30
+  m_CookieSize: 10
+  m_Shadows:
+    m_Type: 0
+    m_Resolution: -1
+    m_Strength: 1
+    m_Bias: 0.05
+    m_Softness: 4
+    m_SoftnessFade: 1
+  m_Cookie: {fileID: 0}
+  m_DrawHalo: 0
+  m_ActuallyLightmapped: 0
+  m_Flare: {fileID: 0}
+  m_RenderMode: 0
+  m_CullingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  m_Lightmapping: 1
+  m_ShadowSamples: 0
+  m_ShadowRadius: 0
+  m_ShadowAngle: 0
+  m_IndirectIntensity: 0
+  m_AreaSize: {x: 0, y: 0}
+--- !u!124 &31
+FlareLayer:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 19}
+  m_Enabled: 1
+--- !u!114 &35
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 19}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c5412d3e57cf20dace16df76699a04f4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  to_fov: 70
+  zoomspeed: 120
+--- !u!114 &36
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Glock
+  prefab: {fileID: 403859, guid: 7ed33f7ad5bc38e45aa91802081bfceb, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: d044a9d5bd4da2741bc82ddb2b9d7a2a, type: 3}
+  holdpos: -1
+  itemnum: 0
+  price: 150
+  sellprice: 35
+--- !u!114 &37
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c06dc3e8a8fa1881659a16ef82e7d8fb, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  flag: {fileID: 2800000, guid: 4f7d17fca790df14f8795f523aaa126e, type: 3}
+  frase:
+  - English
+  - Start Game
+  - Options
+  - Go back
+  - Exit
+  - Start Apocalypse
+  - Join apocalypse (IP)
+  - Start
+  - 'Your survivor''s name:'
+  - Created by AdrianKS
+  - Join
+  - Connecting
+  - Give up
+  - If you can click this button the connection
+  - probably failed and you should try other IP
+  - You left the game
+  - Controls
+  - Sound
+  - Graphics
+  - View controls
+  - 'Mouse sensitivity: '
+  - 'By default:'
+  - WASD to walk
+  - Left shift to sprint
+  - Space to jump
+  - Left mouse to shoot
+  - 'End of match:'
+  - 'Everybody is dead:'
+  - 'Your team killed '
+  - ' zombies'
+  - Auto Reload
+  - 0-9 to switch itens
+  - 'Spawning in '
+  - 'Score - '
+  - Awaiting the kickoff...
+  - Press ENTER to start
+  - Awaiting for permission...
+  - You are dead
+  - Resume
+  - Disconnect
+  - Do you really
+  - want to leave?
+  - Yes
+  - No
+  - You closed the server
+  - You left the game
+  - G to drop item
+  - E to interact
+  - Server list
+  - Refresh
+  - ' players'
+  - 'You are reanimating '
+  - 'You''ll die in '
+  - 'Ammo for '
+  - Advanced
+  - General
+  - Music
+  - 'Your surviving time - '
+  - Go to start menu
+  - Shop
+  - Inventory
+  - Character
+  - Select a slot
+  - to buy or sell
+  - sell
+  - buy
+  - 'Your money = '
+  - +Ammo
+  - 'You got '
+  - You are being reanimated
+  - Hold to aim
+  - Wave mode
+  - 'Wave '
+  - Blunt
+  - Not blunt
+  - Credits
+  - Your character
+  - Weapon store
+  - Skills
+  - Appearence
+  - Organize items
+  - Z,X to lean
+  - Textures
+  - Resolution
+  - Apply
+  - Disabled
+  - High
+  - Medium
+  - Low
+  - Modify
+  - Beard
+  - Beard color
+  - Shirt color
+  - Pants color
+  - Skin color
+  - Symbol
+  - Name
+  - Create server
+  - Join server
+  - Play alone
+  - Server name
+  - Show in server list
+  - Dont show in server list
+  - Use NAT punchthrough
+  - Dont use NAT punchthrough
+  - Create
+  - Too short server name
+  - Direct IP
+  - Connect
+  - This server has password
+  - Confirm
+  - Enable lightmapping
+  - Disable lightmapping
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+--- !u!114 &38
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c06dc3e8a8fa1881659a16ef82e7d8fb, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  flag: {fileID: 2800000, guid: fed734bb2500f7648bbba4eca42d4cc8, type: 3}
+  frase:
+  - Português
+  - Começar Jogo
+  - Opções
+  - Voltar
+  - Sair
+  - Iniciar apocalipse
+  - Entrar em apocalipse (IP)
+  - Começar
+  - 'Nome do sobrevivente:'
+  - Criado por AdrianKS
+  - Entrar
+  - Conectando
+  - desistir
+  - Se você pode clicar nesse botão a conexão
+  - provavelmente falhou e você deveriar tentar outro IP
+  - Você deixou o jogo
+  - Controles
+  - Som
+  - Gráficos
+  - Ver controles
+  - 'Sensibilidade do mouse: '
+  - 'Por padrão:'
+  - WASD para andar
+  - Shift esquerdo para correr
+  - Espaço para pular
+  - Mouse esquerdo para atirar
+  - 'Fim da partida:'
+  - Todos morreram
+  - Sua equipe matou
+  - ' zumbis'
+  - Auto Recarregar
+  - 0-9 para trocar item
+  - 'Nascendo em '
+  - 'Pontos - '
+  - Esperando inicio...
+  - Clique ENTER para começar
+  - Esperando permissão...
+  - Você morreu
+  - Resumir
+  - Desconectar
+  - Você quer
+  - mesmo sair?
+  - Sim
+  - Não
+  - Você fechou o server
+  - Você saiu do jogo
+  - G para largar o item
+  - E para interagir
+  - Lista de servers
+  - Atualizar
+  - ' jogadores'
+  - 'Você está reanimando '
+  - 'Você vai morrer em '
+  - 'Munição para '
+  - Avançado
+  - Geral
+  - Música
+  - 'Você sobrviveu - '
+  - Menu principal
+  - Loja
+  - Inventário
+  - Personagem
+  - Selecione um slot
+  - para comprar ou vender
+  - vender
+  - comprar
+  - 'Seu dinheiro = '
+  - +Munição
+  - 'Você conseguiu '
+  - Você está sendo reanimado
+  - Segurar pra mirar
+  - Modo de onda
+  - 'Onda '
+  - Sem corte
+  - Com corte
+  - Créditos
+  - Seu personagem
+  - Loja de arma
+  - Equipamentos e habilidades
+  - Aparência
+  - Organizar os itens
+  - Z,X para se inclinar
+  - Texturas
+  - Resolução
+  - Aplicar
+  - Desativado
+  - Alto
+  - Médio
+  - Baixo
+  - Modificar
+  - Barba
+  - Cor da barba
+  - Cor da camisa
+  - Cor da calça
+  - Cor da pele
+  - Símbolo
+  - Nome
+  - Criar server
+  - Entrar em server
+  - Jogar sozinho
+  - Nome do server
+  - Mostrar na lista de server
+  - Não mostrar na lista de server
+  - Usar NAT punchthrough
+  - Não usar NAT punchthrough
+  - Criar
+  - Nome do server muito pequeno
+  - IP Direto
+  - Conectar
+  - Esse server tem password
+  - Confirmar
+  - Ativar lightmapping
+  - Desativar lightmapping
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+--- !u!114 &39
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Ingram Mac-10
+  prefab: {fileID: 424449, guid: 81dc6a121ca531346af60918628547fa, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 72ac18e49253b9f4f8b4c1749dfb93d6, type: 3}
+  holdpos: -1
+  itemnum: 1
+  price: 200
+  sellprice: 50
+--- !u!114 &40
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Mp5
+  prefab: {fileID: 403859, guid: ea02153d5bc358d48bb6c012646b2943, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 376998442e6547743a8d7b97dfb9b38e, type: 3}
+  holdpos: -1
+  itemnum: 2
+  price: 1000
+  sellprice: 250
+--- !u!114 &41
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Glock Mag
+  prefab: {fileID: 479954, guid: 1f9f6f5023469e840918c169bec3067b, type: 2}
+  tipo: 1
+  sprite: {fileID: 2800000, guid: c6c9ce5fd96855643b4cf5f3d7d40645, type: 3}
+  holdpos: -1
+  itemnum: 3
+  price: 0
+  sellprice: 0
+--- !u!114 &42
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Ingram Mag
+  prefab: {fileID: 479954, guid: 1f9f6f5023469e840918c169bec3067b, type: 2}
+  tipo: 1
+  sprite: {fileID: 2800000, guid: 2de34d6ee43dbb749bed562a827ea4a8, type: 3}
+  holdpos: -1
+  itemnum: 4
+  price: 0
+  sellprice: 0
+--- !u!114 &43
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Mp5 Mag
+  prefab: {fileID: 479954, guid: 1f9f6f5023469e840918c169bec3067b, type: 2}
+  tipo: 1
+  sprite: {fileID: 2800000, guid: a76127038b018a449a3983b17ec19cbd, type: 3}
+  holdpos: -1
+  itemnum: 5
+  price: 0
+  sellprice: 0
+--- !u!114 &44
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Winchester .12
+  prefab: {fileID: 403859, guid: 056ee575a30f1cb47bd0773ab516dc8c, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 0089e11ca020b9043943bb4def62e497, type: 3}
+  holdpos: -1
+  itemnum: 6
+  price: 2250
+  sellprice: 560
+--- !u!114 &45
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Winchester Mag
+  prefab: {fileID: 479954, guid: 1f9f6f5023469e840918c169bec3067b, type: 2}
+  tipo: 1
+  sprite: {fileID: 2800000, guid: 41481a67179e2934c9119687a3200c1f, type: 3}
+  holdpos: -1
+  itemnum: 7
+  price: 0
+  sellprice: 0
+--- !u!114 &46
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Pipe Wrench
+  prefab: {fileID: 419550, guid: 037d0917259c46448b2675aacc33b16d, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: da92c63b8c09c134aa028ccf14e64532, type: 3}
+  holdpos: -1
+  itemnum: 8
+  price: 30
+  sellprice: 30
+--- !u!114 &47
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c06dc3e8a8fa1881659a16ef82e7d8fb, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  flag: {fileID: 2800000, guid: e87d3a7f1a750ff4d94f31d95ed8e3da, type: 3}
+  frase:
+  - Español
+  - Inicio del juego
+  - Opciones
+  - Volver
+  - Salida
+  - Comenzar apocalipsis
+  - unirse a apocalipsis(IP)
+  - iniciar
+  - 'Su Nombre:'
+  - Creado por AdrianKS
+  - entrar
+  - conectando
+  - renunciar
+  - Si usted puede hacer clic en este botón la conexión
+  - probablemente has fallido
+  - Usted dejó el partido
+  - Controles
+  - sonidos
+  - gráficos
+  - Mirar controles
+  - sensibilidad del ratón
+  - 'por defecto:'
+  - WASD para andar
+  - Left shift para correr
+  - espacio-bar para saltar
+  - Left mouse para disparar
+  - 'Fin de la partida:'
+  - Todo el mundo está muerto
+  - su equipo mató
+  - ' zombis'
+  - Auto recargar
+  - 0-9 para cambiar itens
+  - 'surgiendo en '
+  - 'Score - '
+  - en espera del inicio
+  - Pressiona ENTER para comenzar
+  - A la espera de permiso
+  - Estás muerto
+  - reanudar
+  - desconectar
+  - '¿realmente '
+  - quiere salir?
+  - sí
+  - no
+  - Ha cerrado el servidor
+  - Usted dejó el partido
+  - G para jugar su ítem
+  - E para interacción
+  - Lista de los servidores
+  - Revisar
+  - ' jugadores'
+  - 'Usted estás reanimando '
+  - 'Usted morirá en '
+  - 'Munición para '
+  - Avanzado
+  - General
+  - Música
+  - 'Su tiempo de supervivencia - '
+  - Menú de inicio
+  - Mercado
+  - Inventario
+  - Personaje
+  - Seleccionar un Slot
+  - para comprar o vender
+  - vender
+  - comprar
+  - 'su dinero = '
+  - +munición
+  - 'Ha adquirido '
+  - Usted está siendo revivido
+  - Mantener para apuntar
+  - Modo de onda
+  - 'Onda '
+  - Sin corte
+  - Con corte
+  - Créditos
+  - Tu personaje
+  - Tienda de armas
+  - Equipos y habilidades
+  - Apariencia
+  - Organizar el inventario
+  - Z,X para inclinarse
+  - Texturas
+  - Resolución
+  - Aplicar
+  - Discapacitado
+  - Alto
+  - Regular
+  - Bajo
+  - Modificar
+  - Barba
+  - Color de la barba
+  - Color de la camisa
+  - Color de los pantalones
+  - Color de la piel
+  - Símbolo
+  - Nombre
+  - Crear un server
+  - Unirse a un server
+  - Jugar solo
+  - Nombre del server
+  - Mostrar en la lista de servidores
+  - No mostrar en la lista de servidores
+  - Utilice NAT punchthrough
+  - No utilice NAT punchthrough
+  - Crear
+  - Nombre del servidor demasiado corto
+  - IP directo
+  - Conectar
+  - Este servidor tiene password
+  - Confirmar
+  - Habilitar lightmapping
+  - Desativar lightmapping
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+--- !u!114 &48
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Desert Eagle
+  prefab: {fileID: 491323, guid: a9223aead5600fb45a4dc9208123fa5c, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: bf660d4f6a3ed3340a8a07f9d1fc9a18, type: 3}
+  holdpos: -1
+  itemnum: 9
+  price: 1500
+  sellprice: 375
+--- !u!114 &49
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: DesertEagle mag
+  prefab: {fileID: 409266, guid: 80b6cdccce8d9ba4bbd224ad3a221c54, type: 2}
+  tipo: 1
+  sprite: {fileID: 2800000, guid: 718bce77f2c08ed49ab74f43c7ec0611, type: 3}
+  holdpos: -1
+  itemnum: 10
+  price: 0
+  sellprice: 0
+--- !u!114 &50
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: MED
+  prefab: {fileID: 484216, guid: b4b82164842cdde439272fd05a6cdf5d, type: 2}
+  tipo: 3
+  sprite: {fileID: 2800000, guid: 7a26dbdfcff0c7b44bb749e8b54d0b41, type: 3}
+  holdpos: -1
+  itemnum: 11
+  price: 0
+  sellprice: 0
+--- !u!114 &51
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Cleaver
+  prefab: {fileID: 454010, guid: a1a3abc8ea7462a458983f08105d0337, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: 8f7c0649e2f6be84b86ea7f120238008, type: 3}
+  holdpos: -1
+  itemnum: 12
+  price: 750
+  sellprice: 250
+--- !u!114 &52
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: SigSauer SG
+  prefab: {fileID: 403859, guid: 35e1ed2b8adc77f4a92079df5441b286, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: f2869b5414e0c774fb36cfe2777535bd, type: 3}
+  holdpos: -1
+  itemnum: 13
+  price: 2500
+  sellprice: 600
+--- !u!114 &53
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: SigSauerSG mag
+  prefab: {fileID: 479954, guid: 1f9f6f5023469e840918c169bec3067b, type: 2}
+  tipo: 1
+  sprite: {fileID: 2800000, guid: 57c8a096bd2a6da4c8abb8a99a0538ff, type: 3}
+  holdpos: -1
+  itemnum: 14
+  price: 0
+  sellprice: 0
+--- !u!114 &54
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: XM8
+  prefab: {fileID: 488124, guid: bd2723e0ff4a6db4287a5f281e77747b, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 9712eed03a6992b4dab5cde0fb66984b, type: 3}
+  holdpos: -1
+  itemnum: 15
+  price: 10000
+  sellprice: 2500
+--- !u!114 &55
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Radio
+  prefab: {fileID: 419550, guid: 9e4af534cdba5574f89c090e51c4d4bc, type: 2}
+  tipo: 3
+  sprite: {fileID: 2800000, guid: cdec1286d6b909d4b869d9a6bc250aeb, type: 3}
+  holdpos: -1
+  itemnum: 18
+  price: 0
+  sellprice: 0
+--- !u!114 &56
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Bandages
+  prefab: {fileID: 461526, guid: 5a6c2f8141aa6554b96c0b581176eec1, type: 2}
+  tipo: 3
+  sprite: {fileID: 2800000, guid: fc836110f5b5b0d49b07e4b53bcbc95d, type: 3}
+  holdpos: -1
+  itemnum: 17
+  price: 0
+  sellprice: 0
+--- !u!114 &57
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Ak-47
+  prefab: {fileID: 477035, guid: 546a3239e35d17948bc816ab42796df6, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 9b4ec253a3aa639409c58b028184e54b, type: 3}
+  holdpos: -1
+  itemnum: 16
+  price: 6000
+  sellprice: 1500
+--- !u!114 &58
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: M16
+  prefab: {fileID: 488124, guid: 3575c64f2103ff54d917ba511fec2525, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: e1444e631383a834cb44cfe0ec54b561, type: 3}
+  holdpos: -1
+  itemnum: 19
+  price: 8000
+  sellprice: 2000
+--- !u!114 &59
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: M4A1
+  prefab: {fileID: 469857, guid: 94b6e088a95cfe248896c6e1f03f77f7, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 821cc1e2f6d319c4da4d8082adad15ac, type: 3}
+  holdpos: -1
+  itemnum: 20
+  price: 8000
+  sellprice: 2000
+--- !u!114 &60
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: G36
+  prefab: {fileID: 488124, guid: 9ef15d9119698ef449fb4b80c28b470e, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 18a793c80a480db4ebbe050587c398ca, type: 3}
+  holdpos: -1
+  itemnum: 21
+  price: 10000
+  sellprice: 2500
+--- !u!114 &61
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Enfield
+  prefab: {fileID: 403859, guid: 22d75bb52cc469f43a3b454298d49e76, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: d271d68a4b7a7644a8910b4237ec9f23, type: 3}
+  holdpos: -1
+  itemnum: 22
+  price: 9000
+  sellprice: 2250
+--- !u!114 &62
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: RPG-7
+  prefab: {fileID: 403859, guid: 58be9fd26e87bef4abb3a003282c91f1, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: dd545232bfae25e4ba80001fcfd07ade, type: 3}
+  holdpos: -1
+  itemnum: 23
+  price: 10000
+  sellprice: 2500
+--- !u!114 &63
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: He-Grenade
+  prefab: {fileID: 419550, guid: 67223bbf4aa078f458e68d380e6f74b5, type: 2}
+  tipo: 4
+  sprite: {fileID: 2800000, guid: 19eb56117c98e38448f8167cc59a73a7, type: 3}
+  holdpos: -1
+  itemnum: 24
+  price: 5000
+  sellprice: 1250
+--- !u!114 &64
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: TommyGun
+  prefab: {fileID: 424449, guid: 267444eb1039c2348ada79aa677b98f7, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 8bcfe5e480ef76a47b3217ed1201caff, type: 3}
+  holdpos: -1
+  itemnum: 25
+  price: 5000
+  sellprice: 1250
+--- !u!114 &65
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Weak FlashLight
+  prefab: {fileID: 443158, guid: 16a167190e266dd4b9302bbd6234e9a0, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: da971ad0626bf35469eef8436e4823ff, type: 3}
+  holdpos: -1
+  itemnum: 26
+  price: 500
+  sellprice: 125
+--- !u!114 &66
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Machete
+  prefab: {fileID: 461526, guid: e25521ed35dcf68458e6dd6aea80d716, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: afb834af396eac64aba97341ac4b86e2, type: 3}
+  holdpos: -1
+  itemnum: 27
+  price: 3500
+  sellprice: 875
+--- !u!114 &67
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Glowstick
+  prefab: {fileID: 405782, guid: 12b5e93d913b6754fbf67d7845685cb0, type: 2}
+  tipo: 4
+  sprite: {fileID: 2800000, guid: ee0aabe17106d5240a62247a8c3c8880, type: 3}
+  holdpos: -1
+  itemnum: 28
+  price: 750
+  sellprice: 180
+--- !u!114 &68
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Stick Grenade
+  prefab: {fileID: 454010, guid: caee63d1ebdc0dd4ea3d2b66fcc1ea11, type: 2}
+  tipo: 4
+  sprite: {fileID: 2800000, guid: 206978146e7811145855eee3979c7ae6, type: 3}
+  holdpos: -1
+  itemnum: 29
+  price: 2500
+  sellprice: 625
+--- !u!114 &69
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: RoadFlare
+  prefab: {fileID: 419550, guid: 194ef7a26e3e63544802d1b34ea44f94, type: 2}
+  tipo: 4
+  sprite: {fileID: 2800000, guid: 2f9c0dfcfb3279b4fa813995c7b860d9, type: 3}
+  holdpos: -1
+  itemnum: 30
+  price: 750
+  sellprice: 180
+--- !u!114 &70
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: AA-12
+  prefab: {fileID: 431434, guid: 1f3259db7ca1d194aa09b3fb223ec710, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 3aec3d260495813489c6c37ece496467, type: 3}
+  holdpos: -1
+  itemnum: 31
+  price: 15000
+  sellprice: 3750
+--- !u!114 &71
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: FnScar
+  prefab: {fileID: 477035, guid: ddcb453612f2019429c7671c10cfe64d, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 90ac82545d9505c4c8d91d0705ca5858, type: 3}
+  holdpos: -1
+  itemnum: 32
+  price: 15000
+  sellprice: 3750
+--- !u!114 &72
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Kitchen Knife
+  prefab: {fileID: 454010, guid: 521b1cfffad7b7943a38e25415fed595, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: 157ee63312f91d54d8e01025cb4ea7c6, type: 3}
+  holdpos: -1
+  itemnum: 33
+  price: 750
+  sellprice: 180
+--- !u!114 &73
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Baseball Bat
+  prefab: {fileID: 409266, guid: a0ca036ba5f465d49b7dd2dbd3ee5d68, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: 3b39051337715c64ab34e7884e92670a, type: 3}
+  holdpos: -1
+  itemnum: 34
+  price: 1000
+  sellprice: 250
+--- !u!114 &74
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: FireAxe
+  prefab: {fileID: 461526, guid: f3ac058ef0469de4aab92a0e8801325d, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: e809d323fc9b33e43872ea1557d6dad1, type: 3}
+  holdpos: -1
+  itemnum: 35
+  price: 7000
+  sellprice: 1750
+--- !u!114 &75
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Crowbar
+  prefab: {fileID: 409266, guid: 15238d9ece38f334e826f0618b69c103, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: e7169ac797f809e469e64b680ba1419d, type: 3}
+  holdpos: -1
+  itemnum: 36
+  price: 7000
+  sellprice: 1750
+--- !u!114 &76
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Aluminium bat
+  prefab: {fileID: 409266, guid: bc7e3d573b2072c45844b919e0073e26, type: 2}
+  tipo: 2
+  sprite: {fileID: 2800000, guid: e3499029ce71c624489ba3eb66e27a42, type: 3}
+  holdpos: -1
+  itemnum: 37
+  price: 2500
+  sellprice: 625
+--- !u!114 &77
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: BarbWire
+  prefab: {fileID: 461526, guid: 5ce86f1a35e8058478767875873c02ca, type: 2}
+  tipo: 5
+  sprite: {fileID: 2800000, guid: 5a4327b0c24bd9643a6f322c14761b8c, type: 3}
+  holdpos: -1
+  itemnum: 39
+  price: 0
+  sellprice: 0
+--- !u!114 &78
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: BearTrap
+  prefab: {fileID: 443158, guid: 59d6fda1c9424654e80f25c652cb7e0b, type: 2}
+  tipo: 5
+  sprite: {fileID: 2800000, guid: a6d17ec7df3090f4da39c64f5e8fefa8, type: 3}
+  holdpos: -1
+  itemnum: 38
+  price: 0
+  sellprice: 0
+--- !u!114 &79
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Sandbag
+  prefab: {fileID: 461526, guid: b1e5ff46b758f5349ac2c3551533e3f5, type: 2}
+  tipo: 5
+  sprite: {fileID: 2800000, guid: f9df6de0e82f3054998e75a6923fc16e, type: 3}
+  holdpos: -1
+  itemnum: 40
+  price: 0
+  sellprice: 0
+--- !u!114 &80
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: GroundBarricade
+  prefab: {fileID: 409266, guid: d729933a21cc45f40ab9e3e42267a795, type: 2}
+  tipo: 5
+  sprite: {fileID: 2800000, guid: f0360a784364dac48adf2c1f84ee34ea, type: 3}
+  holdpos: -1
+  itemnum: 41
+  price: 0
+  sellprice: 0
+--- !u!114 &81
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: M202-A1
+  prefab: {fileID: 431434, guid: cecbfbf63690c7f4d8af6971c1c9d8ba, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: e78f61823a343a64583651d7b26f8d1f, type: 3}
+  holdpos: -1
+  itemnum: 42
+  price: 30000
+  sellprice: 7500
+--- !u!114 &82
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Usp-45 S.
+  prefab: {fileID: 477035, guid: cf4e0541d6b1d7846af555e0feebd0e5, type: 2}
+  tipo: 0
+  sprite: {fileID: 2800000, guid: 900030fb65086bb4385ac2a16e92d826, type: 3}
+  holdpos: -1
+  itemnum: 43
+  price: 4000
+  sellprice: 1000
+--- !u!114 &83
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9e8e86901b9788d140a0a9ecef23cf94, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  nome: Vs50-Landmine
+  prefab: {fileID: 454010, guid: 08cd4d067e209b347bc88c87bcb11a9d, type: 2}
+  tipo: 5
+  sprite: {fileID: 2800000, guid: b145cba95fa6d744eb35450c8ef74dce, type: 3}
+  holdpos: -1
+  itemnum: 44
+  price: 0
+  sellprice: 0
+--- !u!114 &84
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 0}
+  m_GameObject: {fileID: 20}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5ff294a93c1d4bd89a961e5b03e73727, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  audiovol: 1
+  musicvol: 1
+  saveinlist: 0
+  testnat: 0
+  buildversion: alpha 0.7.0
+  saveversion: v001
+  gamestate: 0
+  guiskin: {fileID: 11400000, guid: d3ad93c79f0611446ac826b000adfed2, type: 2}
+  guisking: {fileID: 11400000, guid: a7d00b057a0a4744483d0ed40f7d3bde, type: 2}
+  guiskinerr: {fileID: 11400000, guid: 4fb423d5940524c44b895403e8ea2db6, type: 2}
+  guiSlist: {fileID: 11400000, guid: ca95fd14e1869c84c9329acafe3f866a, type: 2}
+  newgui_square: {fileID: 11400000, guid: e1d08e3b82f072b43ad63086be08265a, type: 2}
+  newgui_square2: {fileID: 11400000, guid: fd9be19d59554e84a9b56e5ade02df64, type: 2}
+  newgui_square3: {fileID: 11400000, guid: 967872a1161681e47a1f85d91499bb34, type: 2}
+  newhud:
+  - {fileID: 2800000, guid: cd7eaef7eeb49354da2543b0e6be7570, type: 3}
+  - {fileID: 2800000, guid: 4b363c8c2d0f57e4c97a65770acfd255, type: 3}
+  - {fileID: 2800000, guid: a9e3667ee5a45584ca0fd529b0dad6a2, type: 3}
+  playernick:
+  porttoconec: 50557
+  porttostring: 50557
+  the_password:
+  cam: {fileID: 22}
+  menulogo: {fileID: 2800000, guid: 18856d74356904f4282f46c40acecc70, type: 3}
+  fscreenbuton: {fileID: 2800000, guid: feddda98cb0d04e42bd0a3a5338b04fa, type: 3}
+  SL_line: {fileID: 2800000, guid: fcc62ffc5f151094db73b33752e7a405, type: 3}
+  logoaspect: 1.7
+  spawnerprefab: {fileID: 479954, guid: 766722d403e7cd84a8293a3ebbf8bb15, type: 2}
+  matchcontrollerprefab: {fileID: 479954, guid: 71aa79c54926a6b4782c528b025c6d45, type: 2}
+  matchdataprefab: {fileID: 479954, guid: 74f4e07b0b94d0b4f9b84cc37056b014, type: 2}
+  matchdata: {fileID: 0}
+  matchcontroller: {fileID: 0}
+  scenecontroller: {fileID: 0}
+  errormsg: Created by AdrianKS
+  loadingobjects:
+  - {fileID: 479954, guid: ba6167b61bb2116408dd11a31a538694, type: 2}
+  - {fileID: 479954, guid: 81079b0ff84ab7049945bebf2e371d5f, type: 2}
+  - {fileID: 427192, guid: 91f853f357d10e94abe613c275581295, type: 2}
+  - {fileID: 479954, guid: b476a195643edd448a0ced880c509caa, type: 2}
+  iamserver: 1
+  mousesense: 1
+  autoreload: 1
+  autoaim: 1
+  lastscore: 0
+  timesurvivedsecs: 0
+  timesurvivedmins: 0
+  backsprite: {fileID: 2800000, guid: bda31451fbee29f428ef8d9370aa2f1a, type: 3}
+  enabledsign: {fileID: 2800000, guid: 48bc6866246425547ba56a73cbea5b80, type: 3}
+  disabledsign: {fileID: 2800000, guid: dfa0c2861809daa418f633747ec803c0, type: 3}
+  searchsign: {fileID: 2800000, guid: 6192eb91116933a44933ef61bc1e3650, type: 3}
+  ref_sign: {fileID: 2800000, guid: 5b32279013edf3a429a9ac2182ab4d68, type: 3}
+  languageset: 0
+  language:
+  - {fileID: 37}
+  - {fileID: 38}
+  - {fileID: 47}
+  itemlist:
+  - {fileID: 36}
+  - {fileID: 39}
+  - {fileID: 40}
+  - {fileID: 41}
+  - {fileID: 42}
+  - {fileID: 43}
+  - {fileID: 44}
+  - {fileID: 45}
+  - {fileID: 46}
+  - {fileID: 48}
+  - {fileID: 49}
+  - {fileID: 50}
+  - {fileID: 51}
+  - {fileID: 52}
+  - {fileID: 53}
+  - {fileID: 54}
+  - {fileID: 57}
+  - {fileID: 56}
+  - {fileID: 55}
+  - {fileID: 58}
+  - {fileID: 59}
+  - {fileID: 60}
+  - {fileID: 61}
+  - {fileID: 62}
+  - {fileID: 63}
+  - {fileID: 64}
+  - {fileID: 65}
+  - {fileID: 66}
+  - {fileID: 67}
+  - {fileID: 68}
+  - {fileID: 69}
+  - {fileID: 70}
+  - {fileID: 71}
+  - {fileID: 72}
+  - {fileID: 73}
+  - {fileID: 74}
+  - {fileID: 75}
+  - {fileID: 76}
+  - {fileID: 78}
+  - {fileID: 77}
+  - {fileID: 79}
+  - {fileID: 80}
+  - {fileID: 81}
+  - {fileID: 82}
+  - {fileID: 83}
+  screenlastx: 1134
+  screenlasty: 638
+  disconecplease: 0
+  cannat: 0
+  ispub: 0
+  canlist: 0
+  sp: 0
+  ipstoconec:
+  - 
+  - 
+  - 
+  - 
+  - 
+  trynow: 0
+  ipstotry: 1
+  money: 0
+  invent: 0000000008000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+  itemtosell: 080000001a000000210000000c0000001b00000000000000010000000200000009000000060000000d00000019000000100000001300000014000000160000000f00000015000000200000001f000000170000001d00000018000000220000002300000024000000250000001c0000001e0000002a0000002b000000
+  shoparray: 0000000001000000020000000300000004000000050000000600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000090000000a0000000a0000000a0000001c0000000a0000000a0000000a000000
+  solength: 0
+  shopadicional: 0
+  shopselected: -1
+  shoparrayselected: -1
+  shoptype: 0
+  lockicon: {fileID: 2800000, guid: 2c58a718996d0b94e9edb632606730b4, type: 3}
+  backitem: {fileID: 2800000, guid: bda31451fbee29f428ef8d9370aa2f1a, type: 3}
+  selecteditem: -1
+  buyitem: 0
+  juststarted: 1
+  instedspawner: {fileID: 0}
+  lastaccmoney: 0
+  skymaterial: {fileID: 2100000, guid: b4dd9b182b42c034c99d47ecca1875bf, type: 2}
+  botaosizereload: 5a0000007300000069000000
+  botaosizeaim: 5a0000007d000000a5000000
+  listinicio: 0
+  listmaxroll: 0
+  sharedhud: 0
+  manequimfab: {fileID: 439548, guid: 9d90764d73e621349842eb98e244e5be, type: 2}
+  elmanequim: {fileID: 0}
+  mane_up_cont: 0
+  itempivofab: {fileID: 479954, guid: 1f9f6f5023469e840918c169bec3067b, type: 2}
+  itempivo: {fileID: 0}
+  item_show: {fileID: 0}
+  pretend_resolution: 0
+  pretend_vsync: 0
+  pretend_antialias: 0
+  pretend_texture: 0
+  bytearray: 80
+  my_beard: 3
+  my_beardcolor: 2
+  my_shirtcolor: 4
+  my_skincolor: 2
+  playerprefab: {fileID: 448483, guid: f1bb0fc0131e79c479c00fa4f67c25c6, type: 2}
+  quadribyte: 0000000000000000
+  octabit: 0000000000000000
+  onmouse: -1
+  pivo_vec2: {x: 0, y: 0}
+  turnoff_LM: 0
+  turnoffonter: 0
+  S_name:
+  usarNat: 0
+  tooshort_s_name: 0
+  server_select: -1
+  testvar: 0
+  searching_server:
