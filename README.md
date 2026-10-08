@@ -8,7 +8,7 @@ Bringing the original **Zumbi Blocks** (AdrianKS, 2013, Kongregate / Y8) back to
 - `original/zumbiblocks.html` — the original embed page.
 
 ## Rights
-The game and its assets belong to Adrian (AdrianKS, now making Zumbi Blocks 2). This repo is **private**. Do not publish it publicly or host it for everyone without his permission.
+The game and its assets belong to Adrian (AdrianKS, now making Zumbi Blocks 2). On 2026-10-09 Adrian gave Vito permission to host this revival publicly with multiplayer (keep full credit to him + link to Zumbi Blocks 2). Keep a copy of his reply in `docs/permission/`.
 
 ## Plan
 1. Recover the project from the bundle (AssetRipper) → `game/` Unity project.
