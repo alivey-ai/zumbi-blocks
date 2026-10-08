@@ -1,0 +1,46 @@
+# Recovery notes: Zumbi Blocks 0.7 (Unity 4.2.0f4 Web Player) to Unity 6 WebGL
+
+## Tools
+- AssetRipper 2.0.0 (mac_arm64, free edition), run headless: `AssetRipper.GUI.Free --headless --port 8765`, driven via HTTP (`POST /LoadFolder Path=...`, `POST /Export/UnityProject Path=...`). Default settings: script content level 2, script export Hybrid (decompiled C#), shaders Dummy.
+- Unity 6000.2.14f1 (macOS, WebGL module), built-in render pipeline, batchmode.
+- Python 3 (own UnityWeb extractor, `scripts/extract_unityweb.py`).
+
+## Steps (reproducible)
+1. `python3 -I scripts/extract_unityweb.py original/zb07web.unity3d <dir>`. The UnityWeb container is one LZMA ("alone") stream; it holds 4 managed DLLs (Assembly-UnityScript, firstpass x2, Boo.Lang), level0-1, mainData, sharedassets0-2, and unity_builtin_extra.
+   AssetRipper opened the .unity3d directly but only exported **dummy script stubs**, because it does not pull the DLLs out of a web bundle.
+2. Lay the files out like a Windows standalone player: `ripped/src/ZB_Data/{mainData,level*,sharedassets*,Managed/*.dll,resources/unity_builtin_extra}` plus an empty `ZB.exe`. Load that folder in AssetRipper (`/LoadFolder`) and `/Export/UnityProject`. Now the scripts are real decompiled C# (about 16k lines in 68 classes).
+3. Copy `ExportedProject/Assets` + `ProjectSettings` into `game/`, delete the stray `Assets/Plugins/*.dll` and `Properties/AssemblyInfo.cs`, write a trimmed `Packages/manifest.json`, then apply the scripted rewrites below, and open with Unity 6 in batchmode.
+4. Build: `Unity -batchmode -quit -projectPath game -buildTarget WebGL -executeMethod BuildWebGL.Build -logFile -` -> `game/Build/WebGL` (gitignored). Serve with any static server, e.g. `python3 -m http.server 8137 --directory game/Build/WebGL`.
+   (Unity prints "metal toolchain missing" errors in the log from editor shader compile; they do not affect the WebGL build.)
+
+## What was recovered
+- Scenes in original build order: `menu` (0), `city` (1), `empty` (2) in `Assets/Meus assets/Cenas/`. Menu -> Play alone loads city.
+- 68 UnityScript classes (decompiled to C#), 329 meshes, 125 textures, 25 audio clips, 141 materials, 153 prefabs, 89 animation clips, terrain data, GUI skins, fonts.
+- Original UnityScript is gone, so code is ILSpy-style C# (casts like `(Object)(object)x`, `Main()` stubs, magic ints for enums, all methods were `override` which we dropped).
+
+## Changes made and why
+- `scripts/fix1..3`: mechanical rewrites of Unity 4 APIs: removed shorthand properties (`.animation/.rigidbody/.renderer/.light/.camera/.audio/.collider/.particleSystem` -> `GetComponent<T>()`), `ParticleSystem.emissionRate` -> `emission.rateOverTime`, `Screen.showCursor/lockCursor` -> `Cursor`, ILSpy `(Type)(ref x)` artefacts, `Physics.Raycast(..., ref hit)` -> `out`, `Object.op_Implicit`, `LayerMask.op_Implicit`, removed bogus `override`, `PhysicMaterial` -> `PhysicsMaterial`, `using Object/Random = UnityEngine.*` aliases, dropped ILSpy `_002Ector()` calls. `Application.LoadLevel` still compiles (obsolete warning only).
+- **Shaders**: AssetRipper exported dummy copies of Unity 4 built-ins. `Assets/Editor/FixLegacyShaders.cs` (run once) re-pointed 58 materials to `Legacy Shaders/...` (Specular, Transparent/*, Cutout, Self-Illumin, Particles) and `Skybox/6 Sided`, then the dummy shader folder was deleted. Diffuse materials already resolved to Legacy Diffuse. Colour space set to Gamma to match the Unity 4 look.
+- **Networking stub**: `Assets/Scripts/LegacyNetworkShim.cs` (see below).
+- Build settings: WebGL, 1280x720, compression disabled (no decompression fallback needed), IL2CPP, strip minimal (reflection used by the RPC shim). See `Assets/Editor/BuildWebGL.cs`.
+- Packages: Unity re-added its default packages to the manifest on first open.
+
+## Networking in the original (for the multiplayer phase)
+Unity legacy networking (RakNet based): `Network`, `NetworkView`, `[RPC]`, `MasterServer`. Not Photon.
+- Single player = hosting a local server: `Network.InitializeServer(1, 50123, false)` then `LoadLevel(1)`.
+- Hosting: `Network.InitializeServer(16, port, useNat)`, optional password (`Network.incomingPassword`), `MasterServer.RegisterHost`/`RequestHostList("Zumbiblocks " + buildversion)`, `PollHostList`, NAT checks (`TestConnection`, `HavePublicAddress`). Server list UI in `sc_gamecontrol` (HostData: name, players /16, password flag, ip, port, comment).
+- Joining: `Network.Connect(ips, port, password)`; callbacks `OnConnectedToServer`, `OnFailedToConnect`, `OnDisconnectedFromServer`, `OnPlayerConnected/Disconnected` (in `sc_gamecontrol`, `sc_matchcontroller`).
+- Server-authoritative style: server runs `sc_matchcontroller` (waves, zombie/item/supply spawning via `Network.Instantiate` with group ids: 0 player/spawner, 1 bag, 3 particles, 4 terrain, 5 world objects, 6 ground items, 10 constructions, 11 sound), `sc_zumbi` AI runs on server. 36 `Network.Instantiate` calls, 319 `networkView.RPC` calls (RPCMode Others=1, All=2, OthersBuffered=5, AllBuffered=6, Server=0), ~76 `[RPC]` methods (animation fades, hurtme, killmebuffered, syncinfo, setskin, chat `sendchat/receivechat/servermessage`, `receiveitem/receiveammo`, `setpermission`...). 29 uses of `networkView.isMine`, plus `sc_sendpositionupdate`/`sc_updateposition` for position sync. Players are tracked in `sc_matchcontroller.everybodyspawners` and `sc_matchdata` (names, pings).
+- A WebGL port needs WebSockets/WebRTC, so it must replace the shim with a real transport and a relay/server (e.g. Cloudflare Durable Objects).
+
+### Shim behaviour (single player)
+`Network.Instantiate` = `Instantiate`; `networkView` -> `NetView()` extension that lazily adds a `NetworkView` MonoBehaviour; `RPC(name, mode, args)` invokes the matching method on the same GameObject by reflection for Server/All/AllBuffered, ignores Others*; `MasterServer` returns no hosts; `Network.Connect` fails. Multiplayer menu entries therefore show nothing/fail.
+
+## Known issues / not verified vs original
+- Verified only: menu renders, "Play alone" loads the city with HUD, weapon and the "Press ENTER to start" prompt, no console errors in a short session. Not played through: waves, zombies, vehicles, inventory, building.
+- Lightmaps/lighting and skyboxes from Unity 4 may differ in brightness; scene looks darker than the original in places (needs side by side comparison).
+- 3 prefabs (`muzle rifle`, `Rflare_out`, `shotRPG`) used legacy particle emitters (removed in Unity 6): effects missing.
+- Terrain details/trees (old terrain shaders) not checked.
+- Multiplayer buttons are inert. Cursor lock in WebGL needs a click.
+- The decompiled code is unreviewed; ILSpy can mis-render some constructs (check coroutines, `yield`).
+- Rights: Adrian's game; keep the repo private, do not host publicly.
