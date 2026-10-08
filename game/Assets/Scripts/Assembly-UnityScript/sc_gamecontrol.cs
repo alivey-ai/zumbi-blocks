@@ -419,7 +419,11 @@ public class sc_gamecontrol : MonoBehaviour
 
 	public void Start()
 	{
+#if UNITY_WEBGL
+		Application.targetFrameRate = -1; // WebGL: let the browser drive requestAnimationFrame (a fixed rate forces setTimeout pacing)
+#else
 		Application.targetFrameRate = 120;
+#endif
 		Application.runInBackground = true;
 		Object.DontDestroyOnLoad((Object)(object)((Component)this).gameObject);
 		Object.DontDestroyOnLoad((Object)(object)((Component)cam).gameObject);

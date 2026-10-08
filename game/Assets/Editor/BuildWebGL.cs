@@ -29,8 +29,19 @@ public static class BuildWebGL
             options = BuildOptions.None
         };
         BuildReport rep = BuildPipeline.BuildPlayer(opts);
+        if (rep.summary.result == BuildResult.Succeeded) PatchIndexHtml(outDir);
         Debug.Log("BUILDRESULT " + rep.summary.result + " size=" + rep.summary.totalSize + " errors=" + rep.summary.totalErrors);
         if (rep.summary.result != BuildResult.Succeeded) EditorApplication.Exit(1);
+    }
+
+    // Cap the render-target scale at 1x (the original web player never rendered at retina scale; 2x = 4x the pixels).
+    static void PatchIndexHtml(string outDir)
+    {
+        string p = Path.Combine(outDir, "index.html");
+        string h = File.ReadAllText(p);
+        const string marker = "      document.querySelector(\"#unity-loading-bar\").style.display = \"block\";";
+        if (!h.Contains("perf: no retina") && h.Contains(marker))
+            File.WriteAllText(p, h.Replace(marker, "      config.devicePixelRatio = 1; // perf: no retina-scaled canvas\n" + marker));
     }
 
     public static void ApplySettings()
@@ -44,6 +55,7 @@ public static class BuildWebGL
         PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
         PlayerSettings.WebGL.decompressionFallback = false;
         PlayerSettings.WebGL.dataCaching = false;
+        PlayerSettings.SetIl2CppCodeGeneration(UnityEditor.Build.NamedBuildTarget.WebGL, UnityEditor.Build.Il2CppCodeGeneration.OptimizeSpeed);
         PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
         PlayerSettings.WebGL.template = "APPLICATION:Default";
         PlayerSettings.WebGL.initialMemorySize = 256;

@@ -153,34 +153,48 @@ public class NetworkView : MonoBehaviour
         Dispatch(name, args);
     }
 
+    // Reflection lookups are cached per (type, name, argc); null results are cached too.
+    static readonly System.Collections.Generic.Dictionary<(Type, string, int), MethodInfo> methodCache =
+        new System.Collections.Generic.Dictionary<(Type, string, int), MethodInfo>();
+
+    static MethodInfo FindMethod(Type type, string name, int argc)
+    {
+        var key = (type, name, argc);
+        MethodInfo found;
+        if (methodCache.TryGetValue(key, out found)) return found;
+        for (var t = type; t != null && t != typeof(MonoBehaviour) && found == null; t = t.BaseType)
+        {
+            foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+            {
+                if (m.Name == name && m.GetParameters().Length == argc) { found = m; break; }
+            }
+        }
+        methodCache[key] = found;
+        return found;
+    }
+
     void Dispatch(string name, object[] args)
     {
         if (args == null) args = new object[0];
         foreach (var mb in GetComponents<MonoBehaviour>())
         {
             if (mb == null) continue;
-            for (var t = mb.GetType(); t != null && t != typeof(MonoBehaviour); t = t.BaseType)
+            var m = FindMethod(mb.GetType(), name, args.Length);
+            if (m == null) continue;
+            var ps = m.GetParameters();
+            object[] conv = new object[args.Length];
+            for (int i = 0; i < args.Length; i++)
             {
-                foreach (var m in t.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
-                {
-                    if (m.Name != name) continue;
-                    var ps = m.GetParameters();
-                    if (ps.Length != args.Length) continue;
-                    object[] conv = new object[args.Length];
-                    for (int i = 0; i < args.Length; i++)
-                    {
-                        object a = args[i];
-                        Type pt = ps[i].ParameterType;
-                        if (a != null && !pt.IsInstanceOfType(a) && a is IConvertible && typeof(IConvertible).IsAssignableFrom(pt))
-                            a = Convert.ChangeType(a, pt);
-                        conv[i] = a;
-                    }
-                    object r = m.Invoke(mb, conv);
-                    var e = r as IEnumerator;
-                    if (e != null) mb.StartCoroutine(e);
-                    return;
-                }
+                object a = args[i];
+                Type pt = ps[i].ParameterType;
+                if (a != null && !pt.IsInstanceOfType(a) && a is IConvertible && typeof(IConvertible).IsAssignableFrom(pt))
+                    a = Convert.ChangeType(a, pt);
+                conv[i] = a;
             }
+            object r = m.Invoke(mb, conv);
+            var e = r as IEnumerator;
+            if (e != null) mb.StartCoroutine(e);
+            return;
         }
         Debug.LogWarning("[shim] RPC target not found: " + name + " on " + gameObject.name);
     }

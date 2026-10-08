@@ -44,3 +44,12 @@ Unity legacy networking (RakNet based): `Network`, `NetworkView`, `[RPC]`, `Mast
 - Multiplayer buttons are inert. Cursor lock in WebGL needs a click.
 - The decompiled code is unreviewed; ILSpy can mis-render some constructs (check coroutines, `yield`).
 - Rights: Adrian's game; keep the repo private, do not host publicly.
+
+## Performance (FPS in Chrome)
+Symptom: low FPS on a retina Mac. Changes:
+- **Canvas scale capped at 1x** (`config.devicePixelRatio = 1`, patched into `index.html` by `BuildWebGL.PatchIndexHtml`). Unity 6 defaulted to devicePixelRatio 2, so the 1280x720 canvas rendered 2560x1440 (4x the pixels, on fill-rate-heavy legacy shaders). The original web player rendered 1x. Main cause.
+- **`Application.targetFrameRate`**: `sc_gamecontrol` set 120; on WebGL a fixed rate switches Unity from requestAnimationFrame to setTimeout pacing. Now -1 under `UNITY_WEBGL`.
+- **RPC shim**: `LegacyNetworkShim.Dispatch` cached MethodInfo lookups per (type, name, argc) instead of reflecting on every call.
+- **Terrain pixel error** 1 -> 5 in `city.unity` (Unity default; 1 is extremely heavy on mesh LOD).
+- Checked and left as is: build is release (not development), explicit-exceptions-only, IL2CPP OptimizeSpeed, no light shadows in scene or prefabs, WebGL default quality "Good", single camera (far 1000, no HDR/MSAA), few per-frame Find calls (throttled).
+- Measuring: the automated Chrome tab is hidden (rAF throttled to ~0.2 fps), so no reliable FPS numbers; only verified canvas size 2560x1440 -> 1280x720.
