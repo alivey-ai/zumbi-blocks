@@ -351,6 +351,14 @@ public static class ZbNet
     {
         GameObject go;
         if (roots.TryGetValue(RootOf(viewId), out go)) DestroyNetworked(go);
+        else
+        {
+            // Offline (single player) Network.Instantiate registers no root, but the view itself is
+            // still known. Network.Destroy(viewID) must still destroy the object, otherwise scripts
+            // that rely on it (sc_suplly airdrop crate) keep running and respawn every frame.
+            NetworkView v;
+            if (views.TryGetValue(viewId, out v) && v != null) DestroyNetworked(v.gameObject);
+        }
     }
 
     public static void RemoveRpcs(int player) { if (Active) { w.Begin(C_REMOVE_RPCS).I32(player); Queue(); } }
@@ -834,6 +842,15 @@ public class NetRunner : MonoBehaviour
         sb.Append("]");
         var mc = FindFirstObjectByType<sc_matchcontroller>();
         sb.Append(",\"wave\":").Append(mc != null ? mc.wave : -1).Append(",\"spawners\":").Append(mc != null ? mc.spawners : -1);
+        sb.Append(",\"supply\":").Append(FindObjectsByType<sc_suplly>(FindObjectsSortMode.None).Length)
+          .Append(",\"crates\":").Append(FindObjectsByType<sc_ammocrate>(FindObjectsSortMode.None).Length);
+        { // supply bags: clones of the bag prefab the airdrop crate lands as
+            int bags = 0; var mcp = FindFirstObjectByType<sc_matchcontroller>();
+            var sp = mcp != null && mcp.supllyprefab != null ? mcp.supllyprefab.GetComponent<sc_suplly>() : null;
+            if (sp != null && sp.bagprefab != null)
+                foreach (var t in FindObjectsByType<Transform>(FindObjectsSortMode.None)) if (t.parent == null && t.name == sp.bagprefab.name + "(Clone)") bags++;
+            sb.Append(",\"bags\":").Append(bags);
+        }
         sb.Append(",\"shots\":").Append(FindObjectsByType<sc_shot>(FindObjectsSortMode.None).Length);
         float minLife = float.MaxValue, maxLife = 0f;
         foreach (var z in zs) { var lf = z.GetComponent<sc_life>(); if (lf != null && z.state != -1) { minLife = Mathf.Min(minLife, lf.quantia); maxLife = Mathf.Max(maxLife, lf.quantia); } }
@@ -851,6 +868,22 @@ public class NetRunner : MonoBehaviour
         foreach (var p in players) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) sb.Append(",\"hp\":").Append(Mathf.Round(lf.quantia)); }
         sb.Append("}");
         Debug.Log("ZBDUMP " + sb);
+    }
+
+    // Test hook: the radio's "call supply" path (sc_player armstate 13 -> sc_spawner.asksuplly), without needing the item in hand.
+    public void DebugSupply(string unused)
+    {
+        var sp = FindFirstObjectByType<sc_spawner>();
+        if (sp == null) { Debug.Log("ZBSUPPLY nospawner"); return; }
+        if (Network.isClient) sp.NetView().RPC("asksuplly", RPCMode.Server);
+        else sp.asksuplly();
+        Debug.Log("ZBSUPPLY called");
+    }
+
+    // Test hook: top up the local player's life (idle test players get eaten by zombies).
+    public void DebugHeal(string unused)
+    {
+        foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) lf.quantia = 100f; }
     }
 
     // Test hook: turn the local player towards the nearest living zombie and level the view (lets a headless test aim).
