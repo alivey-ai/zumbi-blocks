@@ -60,15 +60,29 @@ async function drop(P, label) {
   await A.click_(640, 360); await A.keyboard.press("Enter"); await A.waitForTimeout(10000);
   const n0 = await dumpOf(A), m0 = await dumpOf(B);
   await call(B);
-  let peakB = 0, bagsB = 0;
-  const { peak: peakA, peakBags: bagsA } = await sample(async () => { const c = await dumpOf(B); if (c) { peakB = Math.max(peakB, c.supply); bagsB = Math.max(bagsB, c.bags); } return dumpOf(A); }, n0, A);
-  await A.waitForTimeout(500);
-  const n1 = await dumpOf(A), m1 = await dumpOf(B);
+  // sample both pages once a second: host and client must each see one falling crate and then exactly one bag
+  let peakA = 0, peakB = 0, bagsA = 0, bagsB = 0, bagsAllB = 0, landed = -1, a, c;
+  for (let t = 0; t < 60; t++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    await heal(A); await heal(B);
+    a = await dumpOf(A); c = await dumpOf(B); if (!a || !c) continue;
+    peakA = Math.max(peakA, a.supply); peakB = Math.max(peakB, c.supply); bagsA = Math.max(bagsA, a.bags); bagsB = Math.max(bagsB, c.bags); bagsAllB = Math.max(bagsAllB, c.bagsAll ?? c.bags);
+    if (process.env.VERBOSE) console.log("  t=" + t, JSON.stringify({ host: [a.supply, a.bags], client: [c.supply, c.bags, c.bagsAll] }));
+    if (landed < 0 && (a.bags > 0 || c.bags > 0)) landed = t;
+    if (landed >= 0 && t >= landed + 6) break;
+  }
+  const n1 = a, m1 = c;
   console.log("mp", JSON.stringify({ host: [n0.supply, n0.bags, peakA, n1.supply, n1.bags], client: [m0.supply, m0.bags, peakB, m1.supply, m1.bags] }));
   check("mp: exactly one falling crate on the host", peakA === 1, peakA);
+  check("mp: the client sees exactly one falling crate", peakB === 1, peakB);
   check("mp: falling crate gone on host and client", n1.supply === 0 && m1.supply === 0, J(n1.supply, m1.supply));
-  check("mp: exactly one bag on the host (peak)", bagsA === 1, bagsA);
-  check("mp: never more than one bag on the client", bagsB <= 1, bagsB);
+  check("mp: exactly one bag on the host (peak)", bagsA === 1 && n1.bags === 1, J(bagsA, n1.bags));
+  check("mp: the client sees exactly one bag (peak and now)", bagsB === 1 && m1.bags === 1 && bagsAllB === 1, J(bagsB, m1.bags, bagsAllB));
+  // the client opens the bag (RPC openbag, the owner = host acts): the bag must vanish on both
+  await B.evaluate(() => window.unityInstance.SendMessage("ZbNetRunner", "DebugOpenBag", ""));
+  let gone = false, a2, c2;
+  for (let t = 0; t < 15 && !gone; t++) { await new Promise((r) => setTimeout(r, 1000)); await heal(A); await heal(B); a2 = await dumpOf(A); c2 = await dumpOf(B); gone = a2 && c2 && a2.bags === 0 && c2.bags === 0; }
+  check("mp: client opens the bag, it disappears on host and client", gone, J(a2 && a2.bags, c2 && c2.bags));
   await A.context().close(); await B.context().close();
 }
 function J(...a) { return JSON.stringify(a); }
