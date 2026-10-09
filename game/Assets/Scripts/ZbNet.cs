@@ -1041,12 +1041,11 @@ public class NetRunner : MonoBehaviour
         sb.Append(",\"wave\":").Append(mc != null ? mc.wave : -1).Append(",\"spawners\":").Append(mc != null ? mc.spawners : -1);
         sb.Append(",\"supply\":").Append(FindObjectsByType<sc_suplly>(FindObjectsSortMode.None).Length)
           .Append(",\"crates\":").Append(FindObjectsByType<sc_ammocrate>(FindObjectsSortMode.None).Length);
-        { // supply bags: clones of the bag prefab the airdrop crate lands as
-            int bags = 0; var mcp = FindFirstObjectByType<sc_matchcontroller>();
-            var sp = mcp != null && mcp.supllyprefab != null ? mcp.supllyprefab.GetComponent<sc_suplly>() : null;
-            if (sp != null && sp.bagprefab != null)
-                foreach (var t in FindObjectsByType<Transform>(FindObjectsSortMode.None)) if (t.parent == null && t.name == sp.bagprefab.name + "(Clone)") bags++;
-            sb.Append(",\"bags\":").Append(bags);
+        { // supply bags: clones of the bag prefab the airdrop crate lands as. Counted by name (the client has no sc_matchcontroller:
+          // the host alone creates it, so a lookup through its supllyprefab always gave 0 on clients). bagsAll ignores the parent check.
+            int bags = 0, bagsAll = 0;
+            foreach (var t in FindObjectsByType<Transform>(FindObjectsSortMode.None)) if (t.name == "supplybaground(Clone)") { bagsAll++; if (t.parent == null) bags++; }
+            sb.Append(",\"bags\":").Append(bags).Append(",\"bagsAll\":").Append(bagsAll);
         }
         sb.Append(",\"shots\":").Append(FindObjectsByType<sc_shot>(FindObjectsSortMode.None).Length);
         float minLife = float.MaxValue, maxLife = 0f;
@@ -1088,10 +1087,31 @@ public class NetRunner : MonoBehaviour
         Debug.Log("ZBSUPPLY called");
     }
 
+    // Test hook: open the landed airdrop bag exactly like sc_player does when you press E on it (RPC "openbag", RPCMode.All; only the owner acts).
+    public void DebugOpenBag(string unused)
+    {
+        foreach (var t in FindObjectsByType<Transform>(FindObjectsSortMode.None))
+            if (t.name == "supplybaground(Clone)" && t.parent == null) { t.gameObject.NetView().RPC("openbag", RPCMode.All); Debug.Log("ZBBAG opened"); return; }
+        Debug.Log("ZBBAG none");
+    }
+
     // Test hook: top up the local player's life (idle test players get eaten by zombies).
     public void DebugHeal(string unused)
     {
         foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) lf.quantia = 100f; }
+    }
+
+    // Test hook for docs/img/effects-*.png: DebugFx("prefab name[,distance[,ground]]") spawns an effect prefab in front of the camera (plain Instantiate).
+    public void DebugFx(string a)
+    {
+        var f = a.Split(',');
+        var cam = Camera.main; if (cam == null) { Debug.Log("ZBFX nocamera"); return; }
+        var tab = Resources.Load<ZbNetPrefabs>("ZbNetPrefabs"); GameObject pf = null;
+        if (tab != null) foreach (var p in tab.prefabs) if (p != null && p.name == f[0]) pf = p;
+        if (pf == null) { Debug.Log("ZBFX noprefab " + f[0]); return; }
+        float d = f.Length > 1 ? float.Parse(f[1]) : 3f;
+        var go = (GameObject)Instantiate(pf, cam.transform.position + cam.transform.forward * d, cam.transform.rotation);
+        Debug.Log("ZBFX spawned " + f[0] + " systems=" + go.GetComponentsInChildren<ParticleSystem>(true).Length);
     }
 
     // Test hook: turn the local player towards the nearest living zombie and level the view (lets a headless test aim).
