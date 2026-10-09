@@ -16,6 +16,7 @@ const MAIN_QUICK = [750, 231], MAIN_START = [750, 281], MAIN_OPTIONS = [750, 381
 
 // ---------------------------------------------------------------- A: fresh profile, Quick Play with no room open: nickname prompt, then creates a room
 const A = await game(b, "A", BASE, { fresh: true });
+const B = await game(b, "B", BASE);   // loaded now (page load takes a while); joins later while A's countdown runs
 check("fresh profile: no room open yet", (await rooms()).length === 0, J(await rooms()));
 await A.click_(...MAIN_QUICK); await A.waitForTimeout(800);
 let m = await A.menu();
@@ -33,26 +34,19 @@ check("room list never exposes lat / lon", room && !("lat" in room) && !("lon" i
 const code = room && room.code;
 const bar = await A.evaluate(() => ({ shown: getComputedStyle(document.querySelector("#invite")).display, url: document.querySelector("#invite-url").value, code: document.querySelector("#invite-code").textContent }));
 check("invite bar shows the room code and the invite link", bar.shown !== "none" && bar.code === code && bar.url === new URL("/?room=" + code, BASE).href, J(bar));
-// ---------------------------------------------------------------- B: sees the room in the server list, then Quick Play joins it
-const B = await game(b, "B", BASE);
-await B.click_(...MAIN_START); await B.click_(750, 381); await B.waitForTimeout(3500);      // Start Game > Join server
-m = await B.menu();
-const row = m && m.list.find((r) => r.code === code);
-check("server list: row has players / max / wave / region / ping", row && row.players === 1 && row.max === 16 && row.wave === 0 && row.started === 0 && row.country !== undefined && row.ping >= 0, J(m && m.list));
-await B.shot("p3_list.png");
-await B.click_(750, 661); await B.click_(750, 481);                                          // Go back, Go back: main menu
-
-await A.click_(640, 360); // spawn (the first click of the original): the auto start countdown begins
-m = await until(async () => { const x = await A.menu(); return x && x.countdown > 0 && x; }, 8000, 300);
-check("host sees the visible auto start countdown (<= 10 s)", m && m.countdown > 0 && m.countdown <= 10, J(m));
-check("not started yet during the countdown", m && m.started === 0, J(m));
+// ---------------------------------------------------------------- B: Quick Play joins the room while A's countdown runs
+// (the host's player spawns by itself when the city is loaded: the countdown is already running)
 await B.click_(...MAIN_QUICK);
 const samplesA = [], samplesB = [];
-for (let i = 0; i < 14; i++) { const [x, y] = [await A.menu(), await B.menu()]; samplesA.push(x); samplesB.push(y); }
+for (let i = 0; i < 14; i++) { const [x, d, y] = [await A.menu(), await A.dump(), await B.menu()]; x.remote = d ? d.remote : 0; samplesA.push(x); samplesB.push(y); }
+check("host sees the visible auto start countdown (<= 10 s)", samplesA.some((x) => x && x.countdown > 0 && x.countdown <= 10), J(samplesA.map((x) => x && x.countdown)));
+check("not started yet while the countdown runs", samplesA.some((x) => x && x.countdown > 0 && x.started === 0), J(samplesA));
 let db = await B.dump();
 check("Quick Play joins the existing room (client of that room)", db && db.mode === "client" && db.code === code, J(db));
-check("the joining client sees the countdown too", samplesB.some((x) => x && x.countdown > 0), J(samplesB.map((x) => x && x.countdown)));
-check("a second player cuts the countdown to 5 s or less", samplesA.some((x) => x && x.countdown > 0 && x.countdown <= 5), J(samplesA.map((x) => x && x.countdown)));
+check("the joining client sees the countdown too", samplesB.some((x) => x && x.countdown > 0), J([samplesB.map((x) => x && [x.gamestate, x.countdown]), samplesA.map((x) => [x.countdown, x.remote, x.started])]));
+const firstWith2 = samplesA.findIndex((x) => x.remote >= 1);
+const after2 = samplesA.slice(firstWith2 + 1).filter((x) => x.countdown > 0);
+check("a second player cuts the countdown to 5 s or less", firstWith2 >= 0 && after2.every((x) => x.countdown <= 5) && (after2.length > 0 || samplesA.some((x) => x.started === 1)), J(samplesA.map((x) => [x.countdown, x.remote])));
 const r1 = await rooms();
 check("room has 2 players and still exactly one room exists", r1.length === 1 && r1[0].players === 2, J(r1));
 // auto start: no ENTER pressed anywhere
@@ -60,6 +54,13 @@ const started = await until(async () => { const d = await A.dump(); return d && 
 check("match auto starts without ENTER (zombies spawn on the host)", !!started, J(await A.dump()));
 const ra = await until(async () => { const r = (await rooms())[0]; return r && r.started && r.wave >= 1 && r; }, 10000, 500);
 check("room list shows the match started with a wave", !!ra, J(await rooms()));
+// server list as the game shows it: the running match with wave, region and a measured ping
+const C = await game(b, "C", BASE);
+await C.click_(...MAIN_START); await C.click_(750, 381); await C.waitForTimeout(3500);      // Start Game > Join server
+m = await C.menu();
+const row = m && m.list.find((r) => r.code === code);
+check("server list: row has players / max / wave / started / region / ping", row && row.players === 2 && row.max === 16 && row.wave >= 1 && row.started === 1 && row.country !== undefined && row.ping >= 0, J(m && m.list));
+await C.shot("p3_list.png");
 const dbb = await B.dump();
 check("client has zombies too", dbb && dbb.zombies > 0, J(dbb && dbb.zombies));
 

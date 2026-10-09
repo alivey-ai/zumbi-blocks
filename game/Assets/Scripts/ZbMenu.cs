@@ -447,7 +447,7 @@ public static class ZbMenu
     static float nextRefresh;
     static string selCode;
     static int listStamp;
-    static float nextMeta; static int lastMetaKey = -1;
+    static float nextMeta; static int lastMetaKey = -1, lastMetaCd = -1;
     public static float countdownEnd = -1f;      // everybody: when the auto start fires (Time.unscaledTime), -1 none
     static float hostCd = -1f; static bool hostShrunk;
 
@@ -513,10 +513,9 @@ public static class ZbMenu
 
         int flags = (mc.gamestarted ? 1 : 0) | (mc.gameended ? 2 : 0);
         int key = (Mathf.Min(mc.wave, 9999) << 10) | (flags << 8) | Mathf.Min(mc.spawners, 255);
-        bool due = key != lastMetaKey || Time.unscaledTime >= nextMeta;
-        if (cd > 0) { if (Time.unscaledTime >= nextMeta) due = true; else if (key == lastMetaKey) due = false; }
-        if (!due) return;
-        nextMeta = Time.unscaledTime + (cd > 0 ? 1f : 30f); lastMetaKey = key;
+        // on change (wave / flags / players / the countdown's seconds, i.e. once a second while it runs) and at least every 30 s
+        if (!(key != lastMetaKey || cd != lastMetaCd || Time.unscaledTime >= nextMeta)) return;
+        nextMeta = Time.unscaledTime + 30f; lastMetaKey = key; lastMetaCd = cd;
         ZbNet.SendMeta(Mathf.Min(mc.wave, 9999), flags, Mathf.Min(mc.spawners, 255), cd);
     }
 
