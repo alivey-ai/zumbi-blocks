@@ -4,13 +4,13 @@ Rule: **gameplay stays exactly like the original v0.7.** Everything here is arou
 
 Live: https://zumbi-blocks.vito-senic.workers.dev (Adrian approved public hosting 2026-10-09).
 
-## Phase 1 — Feel (in progress)
+## Phase 1 — Feel (done, see docs/MULTIPLAYER.md "Feel layer")
 Make online play feel smooth without changing the network architecture.
-- **Net stats overlay** (toggle with a key): ping to host, jitter, messages/s, KB/s, packet backlog. Used to measure every later change.
-- **Interpolation** for remote players and zombies: render ~100 ms in the past and glide between snapshots instead of snapping.
-- **Instant local feedback** for shooting: hit marker / blood / sound shown on the shooter's screen immediately; the host still decides damage.
-- **Batching**: send all messages from one frame in one WebSocket frame.
-- **Latency test mode**: artificial delay/jitter in local tests so we can prove improvements.
+- [x] **Net stats overlay** (toggle with F3): ping to host, jitter, messages/s, KB/s, packet backlog. Used to measure every later change.
+- [x] **Interpolation** for remote players and zombies: render ~100 ms in the past and glide between snapshots instead of snapping.
+- [x] **Instant local feedback** for shooting (already how the original works, verified and documented): hit marker / blood / sound shown on the shooter's screen immediately; damage is applied by the shooter's bullet as in the original.
+- [x] **Batching**: send all messages from one frame in one WebSocket frame (existed; relay stamps and tests added) + compact state messages (about half the bytes per update) + about 20 Hz state rate.
+- [x] **Latency test mode** (`?netsim=RTT,JITTER`): artificial delay/jitter in local tests so we can prove improvements.
 
 ## Phase 2 — Direct connection (browser to browser)
 - WebRTC DataChannels between host and each client: unreliable/unordered channel for position updates, reliable channel for RPCs.

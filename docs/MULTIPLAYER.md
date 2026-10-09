@@ -71,14 +71,14 @@ The relay compacts the buffer so it does not grow forever (the original relied o
 * `DestroyPlayerObjects(p)` destroys every live object owned by `p` on all peers and removes their history;
 * `RemoveRPCs(p)` removes buffered RPCs sent by `p`.
 
-## Wire protocol (version 1)
+## Wire protocol (version 2)
 
 One binary WebSocket per player. All integers little endian. A WebSocket message is a *frame*: a sequence of messages, each `u16 length` + body (`body[0]` is the opcode). The client sends everything produced in one game frame as one WebSocket message (split below 60 KB); the relay answers per recipient the same way.
 
-Connect URLs (query values URL-encoded, `v` must equal the protocol version or the relay rejects with reason 7):
+Connect URLs (query values URL-encoded, `v` must equal the protocol version or the relay rejects with reason 7; version 2 added the messages marked below, a page from the version 1 era is refused instead of misbehaving):
 
-* host: `GET /ws/host?v=1&max=16&name=NAME&pw=PASSWORD&type=TYPE` (the Worker picks an unused 5 char code, alphabet without I, O, 0, 1)
-* join: `GET /ws/room/CODE?v=1&pw=PASSWORD` (case insensitive)
+* host: `GET /ws/host?v=2&max=16&name=NAME&pw=PASSWORD&type=TYPE` (the Worker picks an unused 5 char code, alphabet without I, O, 0, 1)
+* join: `GET /ws/room/CODE?v=2&pw=PASSWORD` (case insensitive)
 
 Client to relay:
 
@@ -92,6 +92,9 @@ Client to relay:
 | 6 | KICK (host only) | `i32 player` |
 | 7 | PING | `u32 clientTimeMs, u16 lastRttMs` |
 | 8 | LISTING (host only) | `u8 listed, str8 name, str8 comment, str8 type` |
+| 9 | TIME (v2) | `u32 clockMs`: the sender's `performance.now()`, first message of every frame |
+| 10 | ECHO (v2) | `u8 type (0 ping, 1 pong), i32 target, u32 t`: end to end ping, clients may only target the host |
+| 11 | STATE (v2) | compact position update, see "State messages" |
 
 Relay to client:
 
@@ -107,8 +110,84 @@ Relay to client:
 | 0x88 | PONG | `u32 clientTimeMs` |
 | 0x89 | PING_INFO (host) | `i32 id, u16 rttMs` |
 | 0x8A | SYNC_DONE | end of the buffered replay for a new joiner |
+| 0x8B | TIME (v2) | `i32 senderId, u32 clockMs`: first message of every frame that came from a peer's frame with a TIME message (not in buffer replays) |
+| 0x8C | ECHO (v2) | `i32 senderId, u8 type, u32 t` |
+| 0x8D | STATE (v2) | same body as the client's STATE message |
 
 `str8` = `u8 length` + utf8. `args` = `u8 count`, then per argument `u8 tag` + value: 0 null, 1 `i32`, 2 `f32`, 3 `u8` bool, 4 string (`u16 length` + utf8), 5 Vector3 (3 x f32), 6 Quaternion (4 x f32), 7 int[] (`u16 count` + i32s). The relay never looks inside `args`.
+
+## Feel layer (protocol 2)
+
+Everything here sits between the transport and the game's RPC methods; the gameplay scripts are untouched. Baseline and results are at the end of this section.
+
+### How the original synced positions
+There is no `OnSerializeNetworkView` (the exported prefabs have no state-synchronised NetworkView). Positions are plain unbuffered RPCs to `Others`, sent by the owner at a nominal 10 Hz (`sendrate = 10`, counter `+= 1000 * sendrate * dt`, reset to 0 after sending, so 8 to 10 per second at 60 fps and exactly one per frame below 10 fps):
+
+| RPC | sender | args |
+|---|---|---|
+| `setposstuff` | each player, for its own avatar (`sc_player`) | yaw (int degrees), head angle (int), position, `exposi`, `exposiback`, lean |
+| `setzumbistuff` | the host, for every zombie (`sc_zumbi`) | yaw (int degrees), position |
+| `updateposition` | whoever owns the object (bags, dropped items, grenades, supplies: `sc_sendpositionupdate`) | position |
+
+The receivers (`sc_onlinecontroller`, `sc_zumbionlinecontroller`, `sc_updateposition`) only store the latest target and chase it every frame (`Translate((target - position) * dt * 10)`, yaw lerp for players, hard yaw set for zombies): an exponential smoothing with a 100 ms time constant on top of 8 to 10 Hz data with the network jitter in it. Visible effects: a lag of 150 to 250 ms behind the sender, and velocity that jumps at every update (stop-and-go) when packets arrive unevenly.
+
+### Host timestamps and clock offset
+Every frame a peer sends starts with `TIME` (its `performance.now()` in ms). The relay puts it in front of the messages it forwards to each recipient (`0x8B` with the sender id). The receiver keeps, per sender, the smallest `arrival - stamp` of the last 8 s as the clock offset (the path without queueing; it follows changes by at most 1 to 2 ms per frame, so there are no time jumps) and an RFC 3550 style interarrival jitter of the transit time. Arrival times are taken in the jslib when the browser delivers the frame, not when Unity gets around to reading it. Messages without a stamp (buffer replays) are stamped with arrival minus offset.
+
+### Interpolation (`ZbInterp` in ZbNetSync.cs)
+Added automatically to every remote object that receives `setposstuff` / `setzumbistuff` (`ZbSync.TryFeed`, called from `ZbNet.DeliverRpc` for plain RPCs and for compact STATE messages alike).
+* Buffer of the last 24 snapshots `(sender time, position, yaw)`.
+* Render time = `now - clockOffset - delay`. The delay is adaptive: `max(100 ms, 1.1 * snapshot interval + 3 * jitter + 8 ms)`, at most 350 ms, raised quickly and lowered slowly, and it never changes render speed by more than 20 %.
+* Between two snapshots: linear position, `LerpAngle` yaw. Past the newest snapshot: extrapolate with the last velocity for at most 100 ms, then hold. Before the oldest: hold.
+* A jump of more than 6 m between two snapshots (spawn, teleport, respawn) clears the buffer and snaps.
+* It runs in `LateUpdate` with execution order -50, writes the pose into the transform and into the controller's own target fields (`posissao`, `yang`), so the original chase code runs right after it and finds nothing to chase. The local player (client owned, as in the original) and the host's own zombies never get one: movement of the local player is instant, nothing is delayed.
+* `?interp=0` turns it off (original behaviour).
+
+### State messages (compact encoding) and send rate
+`setzumbistuff`, `setposstuff` and `updateposition` sent with mode `Others` are encoded as `STATE` instead of an RPC (no method name, no argument tags): `u8 kind, i64 view` then kind 1 (zombie) `i16 yaw, 3 x f32`, kind 2 (player) `i16 yaw, i16 head, 3 x f32 position, 3 x f32 (exposi, exposiback, lean)`, kind 3 `3 x f32`. That is 24 / 38 / 22 bytes against 47 / 65 / 40 as RPC messages. The receiver rebuilds the original RPC arguments and calls the same methods, so the scripts cannot tell. The relay forwards `STATE` to everyone except the sender, unbuffered, and drops bodies with a wrong length. `?compact=0` sends plain RPCs.
+The host raises `sc_player.sendrate` / `sc_zumbi.sendrate` of every object it instantiates to 30 (`?rate=N`, `?legacy=1` leaves the original 10): the scripts' counter is per frame, so this gives about 20 updates per second at 60 fps and one per frame below 30 fps. Only the network update rate changes, nothing in the game rules.
+
+### Batching
+Messages produced in one game frame were already sent as one WebSocket frame in version 1 (`ZbNet.Queue` / `FlushOut` in `LateUpdate`), and the relay already answered with one frame per recipient per incoming frame (`room.js` `webSocketMessage`: unpack, route, regroup). What version 2 adds: the relay prepends the sender's `TIME`, the frame stays in order, and `server/test/relay.test.mjs` now tests it (one frame per recipient, order, 400 messages in one frame, frame without clock). Waiting to merge frames of several senders would add latency and was not done.
+
+### Round trip to the host
+`ECHO` goes through the relay to the host and straight back (client to host once per second, host to every client once per second); the answer is produced by the host's game loop, so it contains the host's frame delay, which is what the player's actions also see. The old `PING` only measures the relay (still used for `Network.GetAveragePing`).
+
+### Net stats overlay (F3)
+`F3` toggles a panel in the top left (`?stats=1` starts with it on):
+```
+NET STATS  (F3 hides)
+RTT host: 121 ms  (avg 130, min 104, jitter 12)     clients show the host, the host shows every player
+Relay RTT: 67 ms   host->me jitter 15 ms, queue 8 ms
+In : 11.4 KB/s  435 msg/s  51 frames/s
+Out: 0.3 KB/s  8 msg/s  6 frames/s
+Send backlog: 19 B    NETSIM +60 ms
+Interp: 17 entities, 368 snapshots/s, delay 101 ms, buffer 2.1, extrap 0.0%, starved 0.2%
+State: compact, rate 30   60 fps
+```
+Screenshot: `docs/img/net-stats-overlay.png`. Rates are averaged over the last 5 s. Backlog is what is queued in the game plus what the browser has not sent yet (plus what netsim holds back). For tests: `unityInstance.SendMessage("ZbNetRunner", "StatsDump", "")` logs one `ZBSTATS {json}` line with cumulative counters.
+
+### Latency test mode
+`?netsim=RTT,JITTER` on the page URL (e.g. `?netsim=120,30`), implemented in `ZbNet.jslib`: every message this browser sends or receives is delayed by `RTT/2` plus a uniform random `+-JITTER/2`, in order like TCP (a late message holds back those behind it). Add it to the pages that should be "far away"; a client and a host that both use `netsim=60,20` talk with about 120 ms round trip (the path crosses two delayed legs each way). Other test switches: `?legacy=1` (no interpolation, no compact state, original send rate; the same build as the "before" baseline, apart from the clock stamps and echo pings that stay on), `?interp=0`, `?compact=0`, `?rate=N`, `?delay=MS`, `?stats=1`.
+
+### Instant feedback for shooting
+Nothing had to change, it already is shooter-first in the original design (checked in `sc_player` / `sc_shot`): the shooter instantiates the bullet and the muzzle flash locally (`Network.Instantiate` creates the local object before anything goes out), plays the sound and the animation locally, and the bullet's own raycast runs on the shooter's machine (`NetView().isMine`): it applies the damage to the zombie it sees (`sc_life.hurtme` locally and the `hurtme` RPC to the others), shows the hit marker (`add_hitmarker`) and spawns the impact particles, all in the frame of the hit. So hit detection is decided by the shooter against what the shooter sees, not by the host; with interpolation that is the zombie ~100 ms behind the host's truth (the original chase was 150 to 250 ms behind). The e2e test checks that the shooter has its own bullets within 80 ms even with 120 ms of netsim.
+
+### Measured (local relay, headless Chrome with GPU, 1 host + 1 client walking and shooting, 15 zombies of wave 1, 27 s window)
+"Before" = the first version of the game (`traffic`), and `?legacy=1` of the new build for the jitter runs (same behaviour, but the old build has no netsim).
+
+| | before | after |
+|---|---|---|
+| zombie state updates per zombie | every 116 ms (8.6 Hz), sd 13 ms | every 46 ms (21 Hz), sd 7 ms |
+| host out | 7.4 KB/s, 159 msg/s, 27 frames/s, 5.9 msg/frame, 48 B/msg | 9.6 KB/s, 374 msg/s, 29 frames/s, 13 msg/frame, 26 B/msg |
+| client in | 8.1 KB/s | 9.8 KB/s |
+| rendered zombie path error (RMS after best constant delay) | 0.07 m typical, up to 1.0 m (netsim 0); 0.34 m typical, up to 1.2 m (netsim 60,20) | 0.017 m (netsim 0), 0.015 m (netsim 60,20) |
+| effective delay of the rendered remote movement | 150 ms (netsim 0), 225 to 380 ms (60,20) | 100 ms (netsim 0), 145 ms (60,20) |
+| remote player path error | 0.03 to 0.2 m, delay 105 to 210 ms | 0.010 to 0.017 m, delay 100 to 150 ms |
+| interpolation counters (client, 60 fps) | n/a | starved 0.2 % of frames, extrapolating 0.0 to 0.04 %, adaptive delay 100 to 102 ms, 0 teleports |
+| RTT host (stats overlay) | n/a | netsim 0: 6 to 18 ms, netsim 60,20: 136 ms avg, jitter 9 ms |
+
+The "path error" comes from `server/test/e2e/measure.mjs`: every frame the owner records its entity's position and the observer records what it renders (same wall clock); for each entity the constant delay that best explains the rendered path is searched and the remaining RMS distance reported. A smooth, faithful rendering has a small residual; the original chase filter smears and overshoots at every update, and arrival jitter makes it much worse. Limits: one local machine, two or three entities per class moved enough to be compared, numbers vary run to run (the legacy zombie range above is two runs); not a WAN test.
 
 ## Relay details (server/src)
 
@@ -120,14 +199,18 @@ Relay to client:
 
 ## Verified
 
-* `server/test/relay.test.mjs`: relay routing (host/client/late join, all RPC modes, buffering and compaction, destroy, owner checks, kick, host leave, password, full, protocol mismatch, ping).
+* `server/test/relay.test.mjs`: relay routing (host/client/late join, all RPC modes, buffering and compaction, destroy, owner checks, kick, host leave, password, full, protocol mismatch, ping) and the protocol 2 pieces: frame batching (one frame per recipient, order, sender clock first, 400 messages in one frame), STATE forwarding and validation, ECHO routing rules.
 * Real game in headless Chrome (GPU rendering), 4 simultaneous browser pages against the local Worker and against the deployed Worker: host creates a listed room, B joins from the server list, C joins by room code, D joins late (lower case code), match started with Enter, waves/zombies spawn and agree on all peers, avatars follow movement on all peers, shots are replicated as bullet instantiates, leaving clients vanish on the others, in-game Disconnect works for clients and host, host leaving sends clients back to the menu and removes the room from the list, wrong room code shows an error.
+
+* `server/test/e2e/e2e.mjs` (35 checks, the old ones plus: RTT to the host, compact state in use, interpolation active and not starved, batching, F3 overlay, instant local bullets) passes at netsim 0 and at `NETSIM=60,20`. `server/test/e2e/single.mjs` plays single player (Play alone, wave 1, a bot that aims with a test hook and shoots: zombie life drops and a zombie dies; the pistol misses a lot, as in the original, so it can take several attempts). `server/test/e2e/measure.mjs` produces the numbers above.
 
 ## Known limitations
 
 * The host is authoritative and runs the zombie AI, so the host's browser tab must stay visible (browsers throttle background tabs) and the host's connection decides the game's quality. Host migration does not exist (neither did it in the original): if the host leaves the room closes.
 * Latency: every message takes browser -> Cloudflare edge -> browser. Fine for friends in one region, noticeable across continents. One Durable Object lives in one location (near the first player).
-* WebSocket (TCP) instead of RakNet (UDP): a lost packet stalls the stream instead of being skipped, positions are sent at the game's own 10 Hz.
+* WebSocket (TCP) instead of RakNet (UDP): a lost packet stalls the stream instead of being skipped (interpolation hides short stalls, a long one shows as a freeze, then a catch-up). Positions are sent at about 20 Hz (the game's own counter with `sendrate` 30), see the Feel layer.
+* Vehicles, bags, items and projectiles still use the original chase on 10 Hz `updateposition` (compact now, not interpolated yet).
+* Interpolation delay is at least 100 ms: other players are shown 100 to 150 ms in the past (the original was 150 to 250 ms). Hits are decided by the shooter on what the shooter sees.
 * Clients are trusted as in the original (any client can send any RPC to any view). Not a hardened anti-cheat design.
 * No rate limit on room creation per IP, no profanity filter on room names.
 * No NAT / port settings: the menu still shows them but they are ignored.
