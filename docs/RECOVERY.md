@@ -22,7 +22,7 @@
 - `scripts/fix1..3`: mechanical rewrites of Unity 4 APIs: removed shorthand properties (`.animation/.rigidbody/.renderer/.light/.camera/.audio/.collider/.particleSystem` -> `GetComponent<T>()`), `ParticleSystem.emissionRate` -> `emission.rateOverTime`, `Screen.showCursor/lockCursor` -> `Cursor`, ILSpy `(Type)(ref x)` artefacts, `Physics.Raycast(..., ref hit)` -> `out`, `Object.op_Implicit`, `LayerMask.op_Implicit`, removed bogus `override`, `PhysicMaterial` -> `PhysicsMaterial`, `using Object/Random = UnityEngine.*` aliases, dropped ILSpy `_002Ector()` calls. `Application.LoadLevel` still compiles (obsolete warning only).
 - **Shaders**: AssetRipper exported dummy copies of Unity 4 built-ins. `Assets/Editor/FixLegacyShaders.cs` (run once) re-pointed 58 materials to `Legacy Shaders/...` (Specular, Transparent/*, Cutout, Self-Illumin, Particles) and `Skybox/6 Sided`, then the dummy shader folder was deleted. Diffuse materials already resolved to Legacy Diffuse. Colour space set to Gamma to match the Unity 4 look.
 - **Networking stub**: `Assets/Scripts/LegacyNetworkShim.cs` (see below).
-- Build settings: WebGL, 1280x720, compression disabled (no decompression fallback needed), IL2CPP, strip minimal (reflection used by the RPC shim). See `Assets/Editor/BuildWebGL.cs`.
+- Build settings: WebGL, 1280x720, gzip compression (served with Content-Encoding by the Worker, see README), IL2CPP, strip minimal (reflection used by the RPC shim). See `Assets/Editor/BuildWebGL.cs`.
 - Packages: Unity re-added its default packages to the manifest on first open.
 
 ## Networking in the original (for the multiplayer phase)
@@ -31,10 +31,10 @@ Unity legacy networking (RakNet based): `Network`, `NetworkView`, `[RPC]`, `Mast
 - Hosting: `Network.InitializeServer(16, port, useNat)`, optional password (`Network.incomingPassword`), `MasterServer.RegisterHost`/`RequestHostList("Zumbiblocks " + buildversion)`, `PollHostList`, NAT checks (`TestConnection`, `HavePublicAddress`). Server list UI in `sc_gamecontrol` (HostData: name, players /16, password flag, ip, port, comment).
 - Joining: `Network.Connect(ips, port, password)`; callbacks `OnConnectedToServer`, `OnFailedToConnect`, `OnDisconnectedFromServer`, `OnPlayerConnected/Disconnected` (in `sc_gamecontrol`, `sc_matchcontroller`).
 - Server-authoritative style: server runs `sc_matchcontroller` (waves, zombie/item/supply spawning via `Network.Instantiate` with group ids: 0 player/spawner, 1 bag, 3 particles, 4 terrain, 5 world objects, 6 ground items, 10 constructions, 11 sound), `sc_zumbi` AI runs on server. 36 `Network.Instantiate` calls, 319 `networkView.RPC` calls (RPCMode Others=1, All=2, OthersBuffered=5, AllBuffered=6, Server=0), ~76 `[RPC]` methods (animation fades, hurtme, killmebuffered, syncinfo, setskin, chat `sendchat/receivechat/servermessage`, `receiveitem/receiveammo`, `setpermission`...). 29 uses of `networkView.isMine`, plus `sc_sendpositionupdate`/`sc_updateposition` for position sync. Players are tracked in `sc_matchcontroller.everybodyspawners` and `sc_matchdata` (names, pings).
-- A WebGL port needs WebSockets/WebRTC, so it must replace the shim with a real transport and a relay/server (e.g. Cloudflare Durable Objects).
+- Done: the shim now has a real transport (WebSocket) and a Cloudflare Durable Object relay, see `docs/MULTIPLAYER.md`.
 
 ### Shim behaviour (single player)
-`Network.Instantiate` = `Instantiate`; `networkView` -> `NetView()` extension that lazily adds a `NetworkView` MonoBehaviour; `RPC(name, mode, args)` invokes the matching method on the same GameObject by reflection for Server/All/AllBuffered, ignores Others*; `MasterServer` returns no hosts; `Network.Connect` fails. Multiplayer menu entries therefore show nothing/fail.
+`Network.Instantiate` = `Instantiate`; `networkView` -> `NetView()` extension that lazily adds a `NetworkView` MonoBehaviour; `RPC(name, mode, args)` invokes the matching method on the same GameObject by reflection for Server/All/AllBuffered, ignores Others*; `MasterServer` returns no hosts; `Network.Connect` fails. (Superseded: the shim now also implements online play, see `docs/MULTIPLAYER.md`; the offline loopback is still what `InitializeServer(1, ...)` does.)
 
 ## Known issues / not verified vs original
 - Verified only: menu renders, "Play alone" loads the city with HUD, weapon and the "Press ENTER to start" prompt, no console errors in a short session. Not played through: waves, zombies, vehicles, inventory, building.
@@ -43,7 +43,7 @@ Unity legacy networking (RakNet based): `Network`, `NetworkView`, `[RPC]`, `Mast
 - Terrain details/trees (old terrain shaders) not checked.
 - Multiplayer buttons are inert. Cursor lock in WebGL needs a click.
 - The decompiled code is unreviewed; ILSpy can mis-render some constructs (check coroutines, `yield`).
-- Rights: Adrian's game; keep the repo private, do not host publicly.
+- Rights: Adrian's game; he permitted public hosting on 2026-10-09 (see `docs/permission/`), keep the credit and the Zumbi Blocks 2 link on the page.
 
 ## Performance (FPS in Chrome)
 Symptom: low FPS on a retina Mac. Changes:
