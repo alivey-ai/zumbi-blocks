@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zumbi Blocks (web revival)</title>
+  <meta name="description" content="Zumbi Blocks by Adrian (AdrianKS), revived in the browser with online multiplayer.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23161a16'/%3E%3Crect x='3' y='3' width='10' height='10' fill='%2371a84a'/%3E%3Crect x='5' y='6' width='2' height='2' fill='%23161a16'/%3E%3Crect x='9' y='6' width='2' height='2' fill='%23161a16'/%3E%3C/svg%3E">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #0d0f0d; color: #c9d1c4; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    body { display: flex; flex-direction: column; align-items: center; padding: 20px 16px 28px; min-height: 100vh; }
+    h1 { font-size: 20px; letter-spacing: 0.08em; text-transform: uppercase; margin: 4px 0 14px; color: #e6ede1; font-weight: 600; }
+    #stage { position: relative; width: 1280px; height: 720px; max-width: 100%; background: #161a16; border: 1px solid #2a312a; }
+    #unity-canvas { display: block; width: 1280px; height: 720px; background: #161a16; }
+    #loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #161a16; }
+    #loading .label { letter-spacing: 0.12em; text-transform: uppercase; font-size: 13px; color: #8d9a88; }
+    #bar { width: 280px; height: 6px; background: #252c25; }
+    #bar > div { height: 100%; width: 0; background: #71a84a; }
+    #warning { position: absolute; left: 0; right: 0; top: 0; display: none; z-index: 2; }
+    #warning div { margin: 6px; padding: 8px 12px; background: #3a2f12; color: #f0dca0; font-size: 13px; }
+    #bar-row { width: 1280px; max-width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; color: #8d9a88; flex-wrap: wrap; }
+    #fs { background: #222a22; color: #dfe8da; border: 1px solid #36423a; padding: 6px 14px; font: inherit; cursor: pointer; }
+    #fs:hover { background: #2c372c; }
+    a { color: #8fc760; }
+    a:hover { color: #b4e089; }
+    .credit { margin-top: 18px; text-align: center; max-width: 760px; }
+    .small { margin-top: 8px; font-size: 12px; color: #6f7b6b; text-align: center; max-width: 760px; }
+  </style>
+</head>
+<body>
+  <h1>Zumbi Blocks</h1>
+  <div id="stage">
+    <canvas id="unity-canvas" width="1280" height="720" tabindex="-1"></canvas>
+    <div id="loading"><div class="label">Loading</div><div id="bar"><div id="bar-full"></div></div></div>
+    <div id="warning"></div>
+  </div>
+  <div id="bar-row">
+    <span>Create a server and share the room code, or pick a room from the list (Join server / Direct IP takes the room code). Hosts: keep this tab visible, browsers pause background tabs.</span>
+    <button id="fs" type="button">Fullscreen</button>
+  </div>
+  <p class="credit">Zumbi Blocks by Adrian (AdrianKS) &mdash; <a href="https://store.steampowered.com/app/1941780/Zumbi_Blocks_2_Open_Alpha/" target="_blank" rel="noopener">play Zumbi Blocks 2 on Steam</a></p>
+  <p class="small">Unofficial web revival of the original 2013 game, hosted with the author's permission.</p>
+
+  <script>
+    var canvas = document.querySelector("#unity-canvas");
+    function showBanner(msg, type) {
+      var wb = document.querySelector("#warning");
+      var d = document.createElement("div");
+      d.textContent = msg;
+      wb.appendChild(d);
+      wb.style.display = "block";
+      if (type !== "error") setTimeout(function () { wb.removeChild(d); wb.style.display = wb.children.length ? "block" : "none"; }, 5000);
+    }
+    var buildUrl = "Build";
+    var config = {
+      arguments: [],
+      dataUrl: buildUrl + "/{{{ DATA_FILENAME }}}",
+      frameworkUrl: buildUrl + "/{{{ FRAMEWORK_FILENAME }}}",
+      codeUrl: buildUrl + "/{{{ CODE_FILENAME }}}",
+      streamingAssetsUrl: "StreamingAssets",
+      companyName: {{{ JSON.stringify(COMPANY_NAME) }}},
+      productName: {{{ JSON.stringify(PRODUCT_NAME) }}},
+      productVersion: {{{ JSON.stringify(PRODUCT_VERSION) }}},
+      showBanner: showBanner,
+      devicePixelRatio: 1 // perf: the original web player never rendered at retina scale
+    };
+    var script = document.createElement("script");
+    script.src = buildUrl + "/{{{ LOADER_FILENAME }}}";
+    script.onload = function () {
+      createUnityInstance(canvas, config, function (p) {
+        document.querySelector("#bar-full").style.width = (100 * p) + "%";
+      }).then(function (inst) {
+        document.querySelector("#loading").style.display = "none";
+        document.querySelector("#fs").onclick = function () { inst.SetFullscreen(1); };
+        window.unityInstance = inst;
+      }).catch(function (m) { showBanner(String(m), "error"); });
+    };
+    document.body.appendChild(script);
+  </script>
+</body>
+</html>

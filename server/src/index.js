@@ -60,7 +60,8 @@ export default {
         h.set("Content-Encoding", enc);
         h.set("Content-Type", TYPES[ext] || "application/octet-stream");
         h.set("Cache-Control", "public, max-age=0, must-revalidate");
-        return new Response(res.body, { status: res.status, headers: h });
+        // encodeBody "manual": the body is already encoded, the runtime must not compress it again.
+        return new Response(res.body, { status: res.status, headers: h, encodeBody: "manual" });
       }
       return res;
     }

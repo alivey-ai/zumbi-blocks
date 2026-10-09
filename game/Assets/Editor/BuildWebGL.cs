@@ -7,14 +7,26 @@ using UnityEngine;
 /// <summary>
 /// Headless WebGL build:
 ///   Unity -batchmode -quit -projectPath game -executeMethod BuildWebGL.Build -logFile -
-/// Output: game/Build/WebGL (gitignored). Compression is disabled so the folder can be served from any static host.
+/// Output: game/Build/WebGL (gitignored). Gzip compressed (*.gz): must be served with Content-Encoding: gzip
+/// (server/src/index.js does that; a plain static server will not work).
 /// </summary>
 public static class BuildWebGL
 {
-    public static void Build()
+    /// <summary>Development build with full stack traces and no compression: Build/WebGL-debug (serve with a plain static server).</summary>
+    public static void BuildDebug() { Build(true); }
+
+    public static void Build() { Build(false); }
+
+    static void Build(bool debug)
     {
         ApplySettings();
-        string outDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Build", "WebGL"));
+        if (debug)
+        {
+            PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+            PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.FullWithStacktrace;
+        }
+        ZbNetPrefabsBuilder.Rebuild();
+        string outDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Build", debug ? "WebGL-debug" : "WebGL"));
         if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
         Directory.CreateDirectory(outDir);
 
@@ -26,22 +38,11 @@ public static class BuildWebGL
             scenes = scenes.ToArray(),
             locationPathName = outDir,
             target = BuildTarget.WebGL,
-            options = BuildOptions.None
+            options = debug ? BuildOptions.Development : BuildOptions.None
         };
         BuildReport rep = BuildPipeline.BuildPlayer(opts);
-        if (rep.summary.result == BuildResult.Succeeded) PatchIndexHtml(outDir);
         Debug.Log("BUILDRESULT " + rep.summary.result + " size=" + rep.summary.totalSize + " errors=" + rep.summary.totalErrors);
         if (rep.summary.result != BuildResult.Succeeded) EditorApplication.Exit(1);
-    }
-
-    // Cap the render-target scale at 1x (the original web player never rendered at retina scale; 2x = 4x the pixels).
-    static void PatchIndexHtml(string outDir)
-    {
-        string p = Path.Combine(outDir, "index.html");
-        string h = File.ReadAllText(p);
-        const string marker = "      document.querySelector(\"#unity-loading-bar\").style.display = \"block\";";
-        if (!h.Contains("perf: no retina") && h.Contains(marker))
-            File.WriteAllText(p, h.Replace(marker, "      config.devicePixelRatio = 1; // perf: no retina-scaled canvas\n" + marker));
     }
 
     public static void ApplySettings()
@@ -52,12 +53,12 @@ public static class BuildWebGL
         PlayerSettings.defaultWebScreenWidth = 1280;
         PlayerSettings.defaultWebScreenHeight = 720;
         PlayerSettings.runInBackground = true;                      // original set Application.runInBackground
-        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Disabled;
+        PlayerSettings.WebGL.compressionFormat = WebGLCompressionFormat.Gzip;   // wasm is 35 MB raw; Workers assets cap files at 25 MiB. Gzip (not Brotli): Chrome only decodes br over https
         PlayerSettings.WebGL.decompressionFallback = false;
         PlayerSettings.WebGL.dataCaching = false;
         PlayerSettings.SetIl2CppCodeGeneration(UnityEditor.Build.NamedBuildTarget.WebGL, UnityEditor.Build.Il2CppCodeGeneration.OptimizeSpeed);
         PlayerSettings.WebGL.exceptionSupport = WebGLExceptionSupport.ExplicitlyThrownExceptionsOnly;
-        PlayerSettings.WebGL.template = "APPLICATION:Default";
+        PlayerSettings.WebGL.template = "PROJECT:ZumbiBlocks";
         PlayerSettings.WebGL.initialMemorySize = 256;
         PlayerSettings.WebGL.memoryGrowthMode = WebGLMemoryGrowthMode.Geometric;
         PlayerSettings.SetScriptingBackend(UnityEditor.Build.NamedBuildTarget.WebGL, ScriptingImplementation.IL2CPP);

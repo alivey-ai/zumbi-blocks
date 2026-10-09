@@ -820,7 +820,7 @@ public class sc_gamecontrol : MonoBehaviour
 			}
 			if ((int)error == 15)
 			{
-				errormsg = "Internal problem";
+				errormsg = "Room not found or closed (check the room code)";
 			}
 			if ((int)error == 18)
 			{
@@ -2565,7 +2565,7 @@ public class sc_gamecontrol : MonoBehaviour
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2), (float)newhud[2].width, (float)newhud[2].height), newhud[2], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 50), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 100), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
-			GUI.Label(new Rect((float)(num7 - 170), (float)(Screen.height / 2 - 95), 100f, 32f), "Ip");
+			GUI.Label(new Rect((float)(num7 - 170), (float)(Screen.height / 2 - 95), 100f, 32f), "Room code");
 			GUI.Label(new Rect((float)(num7 - 170), (float)(Screen.height / 2 - 45), 100f, 32f), "Port");
 			GUI.Label(new Rect((float)(num7 - 170), (float)(Screen.height / 2 + 5), 100f, 32f), "Password");
 			ipstoconec[0] = GUI.TextField(new Rect((float)num7, (float)(Screen.height / 2 - 95), 200f, 30f), ipstoconec[0], 15);
@@ -2737,7 +2737,7 @@ public class sc_gamecontrol : MonoBehaviour
 						if (val62.Contains(val2))
 						{
 							GUI.Label(new Rect((float)(Screen.width / 2 + 10), (float)(Screen.height / 2 + 15), 150f, 25f), string.Empty + hostData[num2].connectedPlayers + "/" + (hostData[num2].playerLimit - 1) + language[languageset].frase[50]);
-							GUI.Label(new Rect((float)(Screen.width / 2 + 10), (float)(Screen.height / 2 + 35), 200f, 25f), hostData[num2].ip[0] + ":" + hostData[num2].port);
+							GUI.Label(new Rect((float)(Screen.width / 2 + 10), (float)(Screen.height / 2 + 35), 200f, 25f), hostData[num2].ip[0] + (hostData[num2].port != 0 ? ":" + hostData[num2].port : ""));
 							GUI.Label(new Rect((float)(Screen.width / 2 + 10), (float)(Screen.height / 2 + 55), 300f, 25f), hostData[num2].gameType);
 							GUI.Label(new Rect((float)(Screen.width / 2 + 10), (float)(Screen.height / 2 + 75), 300f, 25f), hostData[num2].comment);
 						}
