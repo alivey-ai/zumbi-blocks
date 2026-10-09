@@ -18,6 +18,15 @@ export async function game(b, name, base = "http://localhost:8787/") {
   await p.waitForTimeout(1500);
   p.click_ = async (x, y) => { const r = await p.evaluate(() => { const r = document.querySelector("#unity-canvas").getBoundingClientRect(); return { x: r.x, y: r.y }; }); await p.mouse.move(r.x + x, r.y + y); await p.waitForTimeout(80); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); await p.waitForTimeout(400); };
   p.dump = async () => { const n = p.logs.length; await p.evaluate(() => window.unityInstance.SendMessage("ZbNetRunner", "DebugDump", "")); for (let i = 0; i < 40; i++) { await p.waitForTimeout(100); const l = p.logs.slice(n).find((x) => x.startsWith("ZBDUMP ")); if (l) return JSON.parse(l.slice(7)); } return null; };
+  const ask = async (msg, prefix, tries = 60) => { const n = p.logs.length; await p.evaluate((m) => window.unityInstance.SendMessage("ZbNetRunner", m, ""), msg); for (let i = 0; i < tries; i++) { await p.waitForTimeout(100); const l = p.logs.slice(n).find((x) => x.startsWith(prefix)); if (l) return JSON.parse(l.slice(prefix.length)); } return null; };
+  p.statsDump = () => ask("StatsDump", "ZBSTATS ");           // cumulative traffic / rtt / interpolation counters of this page
+  p.sampleStart = () => p.evaluate(() => window.unityInstance.SendMessage("ZbNetRunner", "SampleStart", ""));
+  p.sampleStop = async () => { // per-frame positions of every player / zombie that moved: [{id, mine, z, t0, p:[dt,x,z,...]}]
+    const n = p.logs.length; await ask("SampleStop", "ZBSAMPLE ", 300);
+    const m = new Map();
+    for (const l of p.logs.slice(n)) { if (!l.startsWith("ZBT ")) continue; const [h, d] = l.split(" | "); const f = h.split(" "); const k = f[1]; if (!m.has(k)) m.set(k, { id: Number(k), mine: Number(f[2]), z: Number(f[3]), t0: Number(f[4]), p: [] }); for (const v of d.split(",")) m.get(k).p.push(Number(v)); }
+    return [...m.values()];
+  };
   p.shot = async (f) => { await p.locator("#unity-canvas").screenshot({ path: f }); };
   return p;
 }

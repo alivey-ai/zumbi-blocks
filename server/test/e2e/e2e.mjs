@@ -1,6 +1,11 @@
 import { launch, game } from "./lib.mjs";
 import assert from "node:assert/strict";
-const BASE = process.env.BASE || "http://localhost:8787/";
+const BASE0 = process.env.BASE || "http://localhost:8787/";
+// NETSIM="60,20": every page adds 60 ms round trip +-20 ms jitter to its own socket (client <-> host path is crossed twice: ~2x).
+const NETSIM = process.env.NETSIM || "0";
+const BASE = NETSIM !== "0" ? BASE0 + (BASE0.includes("?") ? "&" : "?") + "netsim=" + NETSIM : BASE0;
+const LEGACY = /legacy=1/.test(BASE);
+console.log("e2e BASE", BASE, "NETSIM", NETSIM);
 const b = await launch();
 let pass = 0, fail = 0;
 const check = (name, cond, extra = "") => { if (cond) { pass++; console.log("ok   " + name); } else { fail++; console.log("FAIL " + name + " " + extra); } };
@@ -43,6 +48,21 @@ check("wave started everywhere (zombies > 0)", da.zombies > 0 && db.zombies > 0 
 check("zombie counts match", da.zombies === db.zombies && db.zombies === dc.zombies, J([da.zombies, db.zombies, dc.zombies]));
 check("wave number synced", da.wave === 1, J(da.wave));
 
+// --- shooting sync ---
+const sentBefore = B.stats.instSent[1] || 0; const recvBefore = A.stats.instRecv[1] || 0;
+await B.click_(640, 360);
+await B.mouse.down(); await B.waitForTimeout(1500); await B.mouse.up(); await B.waitForTimeout(500);
+check("B's shots are sent as bullet instantiates (group 1)", (B.stats.instSent[1] || 0) > sentBefore, J(B.stats.instSent));
+check("host receives B's bullets", (A.stats.instRecv[1] || 0) > recvBefore, J(A.stats.instRecv));
+
+
+{
+  // instant local feedback: the shooter has its own bullet / muzzle effect without waiting for any network round trip
+  const t0 = Date.now(); await B.mouse.down(); await B.waitForTimeout(80);
+  const local = await B.dump(); await B.mouse.up();
+  check("shooter sees own bullets immediately (local instantiate, before any echo)", local && local.shots > 0, J([local && local.shots, Date.now() - t0]));
+}
+
 // --- movement sync ---
 const posOf = (d, name) => d.players.find((p) => p.name === name);
 await A.keyboard.down("w"); await A.waitForTimeout(3000); await A.keyboard.up("w"); await A.waitForTimeout(1200);
@@ -63,12 +83,33 @@ check("B's avatar position matches on host (or B died: skipped)", !bOnB || !bOnA
   check("host and client agree on zombie positions", a1.length > 0 && same >= a1.length * 0.6, J([a1.length, same]));
 }
 
-// --- shooting sync ---
-const sentBefore = B.stats.instSent[1] || 0; const recvBefore = A.stats.instRecv[1] || 0;
-await B.click_(640, 360);
-await B.mouse.down(); await B.waitForTimeout(1500); await B.mouse.up(); await B.waitForTimeout(500);
-check("B's shots are sent as bullet instantiates (group 1)", (B.stats.instSent[1] || 0) > sentBefore, J(B.stats.instSent));
-check("host receives B's bullets", (A.stats.instRecv[1] || 0) > recvBefore, J(A.stats.instRecv));
+// --- feel layer: stats overlay, host round trip, compact state, interpolation, instant local shooting feedback ---
+{
+  const sA = await A.statsDump(), sB = await B.statsDump();
+  console.log("stats A", J(sA)); console.log("stats B", J(sB));
+  check("stats dump works on host and client", !!sA && !!sB);
+  const rttB = sB && sB.rtt && sB.rtt["0"];
+  check("client measures RTT to the host (echo)", rttB && rttB.n >= 3 && rttB.last >= 0 && rttB.last < 2000, J(rttB));
+  check("host measures RTT to both clients", sA && sA.rtt && sA.rtt["1"] && sA.rtt["2"] && sA.rtt["1"].n >= 3, J(sA && sA.rtt));
+  if (NETSIM !== "0") {
+    const d = Number(NETSIM.split(",")[0]);
+    check("netsim shows up in the RTT (host <-> client ~ 2x netsim)", rttB.avg > 1.5 * d, J([rttB.avg, d]));
+  }
+  check("sender clock / jitter tracked for the host", sB && sB.clockJitter && sB.clockJitter["0"] !== undefined, J(sB && sB.clockJitter));
+  if (!LEGACY) {
+    check("state travels as compact messages (S_STATE 0x8d)", (B.stats.recv[0x8d] || 0) > 100 && (A.stats.sent[11] || 0) > 100, J([B.stats.recv[0x8d], A.stats.sent[11]]));
+    check("interpolation active on the client", sB.interp.on === 1 && sB.interp.entities > 0 && sB.interp.snaps > 100, J(sB.interp));
+    check("interpolation is not starved or teleporting", sB.interp.frames > 0 && sB.interp.starved / sB.interp.frames < 0.05 && sB.interp.teleports < 10, J(sB.interp));
+    check("interpolation delay adapted to a sane value (100..350 ms)", sB.interp.avgDelay >= 99 && sB.interp.avgDelay <= 350, J(sB.interp.avgDelay));
+  }
+  check("frames carry several messages (batching)", (sB.rx.msgs / Math.max(1, sB.rx.frames)) > 1.5 && (sA.tx.msgs / Math.max(1, sA.tx.frames)) > 1.5, J([sB.rx, sA.tx]));
+  // F3 overlay toggle
+  await B.keyboard.press("F3"); await B.waitForTimeout(600);
+  const on = await B.statsDump(); await B.shot("b_overlay_on.png");
+  await B.keyboard.press("F3"); await B.waitForTimeout(600);
+  const off = await B.statsDump();
+  check("F3 toggles the stats overlay", on.overlay === 1 && off.overlay === 0, J([on.overlay, off.overlay]));
+}
 
 // --- late join (D) ---
 const D = await game(b, "D", BASE);
@@ -106,5 +147,5 @@ const after = await (await fetch(new URL("/api/rooms", BASE))).json();
 check("room removed from the list", after.length === 0, J(after));
 
 console.log(`${pass} passed, ${fail} failed`);
-await b.close();
+await Promise.race([b.close(), new Promise((r) => setTimeout(r, 3000))]);
 process.exit(fail ? 1 : 0);

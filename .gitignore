@@ -15,3 +15,5 @@
 /ripped/
 .DS_Store
 /game/*.slnx
+# e2e screenshots
+/server/test/e2e/*.png
