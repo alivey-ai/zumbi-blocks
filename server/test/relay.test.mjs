@@ -319,5 +319,72 @@ await test("rtc: dc flag moves host state off the websocket of that client only;
   [h, b, a2, legacy].forEach((x) => x.close());
 });
 
+const meta = (wave, flags, alive, cd) => { const b = new Uint8Array(cd === undefined ? 5 : 6); b[0] = 16; b[1] = wave & 255; b[2] = wave >> 8; b[3] = flags; b[4] = alive; if (cd !== undefined) b[5] = cd; return b; };
+const T = "Zumbiblocks test";
+const api = async (p) => { const r = await fetch(`http://${BASE}${p}`); return { status: r.status, body: await r.json() }; };
+
+await test("phase 3: /api/room/:code info, no secrets, 404 for unknown / closed rooms", async () => {
+  const a = await host("&pw=secret&type=" + encodeURIComponent(T)); await sleep(200);
+  let r = await api(`/api/room/${a.code.toLowerCase()}`);
+  assert.equal(r.status, 200); assert.equal(r.body.exists, true); assert.equal(r.body.players, 1); assert.equal(r.body.pw, true); assert.equal(r.body.type, T);
+  assert.equal(r.body.started, false); assert.equal(r.body.wave, 0);
+  assert.ok(!JSON.stringify(r.body).includes("secret"), "no password in the response");
+  r = await api("/api/room/ZZZZZ"); assert.equal(r.status, 404); assert.equal(r.body.exists, false);
+  r = await api("/api/room/bad%20code!"); assert.equal(r.status, 404);
+  const ping = await api(`/api/ping/${a.code}`); assert.equal(ping.status, 200);
+  a.h.close(); await sleep(300);
+  r = await api(`/api/room/${a.code}`); assert.equal(r.status, 404);
+});
+
+await test("phase 3: C_META updates the room list (wave, started, ended), only from the host, malformed ignored; no lat/lon published", async () => {
+  const a = await host("&type=" + encodeURIComponent(T)); a.h.send(listing(true, "Meta Room")); await sleep(200);
+  const c = await join(a.code); await c.take(0x8a);
+  c.send(meta(9, 1, 1)); await sleep(200);
+  let row = (await (await fetch(`http://${BASE}/api/rooms`)).json()).find((r) => r.code === a.code);
+  assert.equal(row.wave, 0, "a client cannot report meta");
+  a.h.send(new Uint8Array([16, 1, 2])); a.h.send(new Uint8Array([16, 3, 0, 1, 2, 3, 4, 5, 6])); await sleep(200);
+  row = (await (await fetch(`http://${BASE}/api/rooms`)).json()).find((r) => r.code === a.code);
+  assert.equal(row.wave, 0, "malformed ignored");
+  a.h.send(meta(7, 1, 2)); await sleep(300);
+  row = (await (await fetch(`http://${BASE}/api/rooms`)).json()).find((r) => r.code === a.code);
+  assert.equal(row.wave, 7); assert.equal(row.started, true); assert.equal(row.ended, false); assert.ok(row.age >= 0);
+  assert.ok(!("lat" in row) && !("lon" in row) && !("created" in row), "no host location in the public list");
+  const info = (await api(`/api/room/${a.code}`)).body; assert.equal(info.wave, 7); assert.equal(info.started, true);
+  a.h.send(meta(7, 3, 0)); await sleep(300);
+  assert.equal((await api(`/api/room/${a.code}`)).body.ended, true);
+  a.h.close(); c.close();
+});
+
+await test("phase 3: auto start countdown reaches the other players (host sends it, relay forwards)", async () => {
+  const a = await host("&type=" + encodeURIComponent(T)); const c = await join(a.code); await c.take(0x8a);
+  a.h.send(meta(0, 0, 1, 9)); const m = await c.take(0x95); assert.equal(m[1], 9);
+  a.h.send(meta(0, 0, 1, 0)); const m2 = await c.take(0x95); assert.equal(m2[1], 0);
+  a.h.send(meta(0, 1, 1, 0)); await c.none(0x95, 300);
+  c.send(meta(0, 0, 1, 5)); await a.h.none(0x95, 300);
+  a.h.close(); c.close();
+});
+
+await test("phase 3: /api/quickplay offers joinable rooms of the same build only, best first", async () => {
+  const TY = "Zumbiblocks qp" + Date.now();
+  const mk = async (name, extra, players, m) => {
+    const r = await host("&max=4&type=" + encodeURIComponent(TY) + extra); r.h.send(listing(true, name)); const cl = [];
+    for (let i = 1; i < players; i++) { const c = await join(r.code, extra.includes("pw=") ? "&pw=x" : ""); await c.take(0x8a); cl.push(c); }
+    if (m) r.h.send(m); r.cl = cl; return r;
+  };
+  const one = await mk("QP one", "", 1);
+  const three = await mk("QP three", "", 3, meta(2, 1, 3));
+  const full = await mk("QP full", "", 4);
+  const pw = await mk("QP pw", "&pw=x", 3);
+  const ended = await mk("QP ended", "", 2, meta(5, 3, 0));
+  const other = await host("&max=4&type=" + encodeURIComponent("Zumbiblocks other")); other.h.send(listing(true, "QP other build"));
+  await sleep(500);
+  const r = await api("/api/quickplay?type=" + encodeURIComponent(TY));
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.map((x) => x.name), ["QP three", "QP one"], JSON.stringify(r.body.map((x) => x.name)));
+  assert.ok(r.body.every((x) => !x.pw && x.players < x.max && x.type === TY));
+  assert.deepEqual((await api("/api/quickplay?type=nope")).body, []);
+  for (const x of [one, three, full, pw, ended, other]) { x.h.close(); (x.cl || []).forEach((c) => c.close()); }
+});
+
 console.log(`${ok} tests passed`);
 process.exit(process.exitCode || 0);

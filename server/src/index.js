@@ -25,6 +25,22 @@ export default {
       return Response.json(rooms, { headers: { "cache-control": "no-store" } });
     }
 
+    if (path.startsWith("/api/room/") || path.startsWith("/api/ping/")) {
+      const code = decodeURIComponent(path.slice("/api/room/".length)).toUpperCase();
+      if (!CODE_RE.test(code)) return Response.json({ exists: false }, { status: 404, headers: { "cache-control": "no-store" } });
+      const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
+      if (path.startsWith("/api/ping/")) { await stub.ping(); return Response.json({ ok: 1 }, { headers: { "cache-control": "no-store" } }); }
+      const info = await stub.info();
+      return Response.json(info, { status: info.exists ? 200 : 404, headers: { "cache-control": "no-store" } });
+    }
+
+    if (path === "/api/quickplay") {
+      const cf = request.cf || {};
+      const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
+      const rooms = await lobby.quickplay(url.searchParams.get("type") || "", Number(cf.latitude) || 0, Number(cf.longitude) || 0);
+      return Response.json(rooms, { headers: { "cache-control": "no-store" } });
+    }
+
     if (path === "/ws/host" || path.startsWith("/ws/room/")) {
       if (request.headers.get("Upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
       const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
@@ -34,6 +50,9 @@ export default {
         u.searchParams.set("code", code);
         u.searchParams.set("host", host ? "1" : "0");
         u.searchParams.set("ipid", ip);
+        // where the host is (server side only: the room list publishes colo + country, never lat/lon)
+        const cf = request.cf || {};
+        for (const [k, v] of [["colo", cf.colo], ["country", cf.country], ["lat", cf.latitude], ["lon", cf.longitude]]) { u.searchParams.delete(k); if (host && v != null) u.searchParams.set(k, String(v)); }
         return stub.fetch(new Request(u, request));
       };
       if (path === "/ws/host") {

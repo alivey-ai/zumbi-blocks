@@ -28,8 +28,23 @@ export class Lobby extends DurableObject {
     if (this.rooms.delete(code)) await this.ctx.storage.put("rooms", [...this.rooms]);
   }
 
+  // Public rows: never lat/lon (city level location of the host), only colo + country.
   async list() {
     this.prune();
-    return [...this.rooms.values()].map(({ t, ...r }) => r).sort((a, b) => b.players - a.players);
+    const now = Date.now();
+    return [...this.rooms.values()].map(({ t, lat, lon, created, ...r }) => ({ ...r, age: created ? Math.max(0, Math.round((now - created) / 1000)) : 0 }))
+      .sort((a, b) => b.players - a.players);
+  }
+
+  // Quick Play: up to 3 candidates of this build that can be joined now, best first. Not full, no password, not ended; rooms that wait in
+  // the lobby for more than 3 minutes (abandoned) go last. Then most players, nearest (distance computed here from the caller's lat/lon), newest.
+  async quickplay(type, lat, lon) {
+    this.prune();
+    const now = Date.now();
+    const dist = (r) => (lat || lon) && (r.lat || r.lon) ? Math.hypot(r.lat - lat, (r.lon - lon) * Math.cos((lat * Math.PI) / 180)) : 999;
+    const rows = [...this.rooms.values()].filter((r) => r.type === type && !r.pw && !r.ended && r.players < r.max && r.players >= 1);
+    const stale = (r) => (!r.started && now - (r.created || now) > 180_000 && !r.quick ? 1 : 0);
+    rows.sort((a, b) => stale(a) - stale(b) || b.players - a.players || dist(a) - dist(b) || (b.created || 0) - (a.created || 0));
+    return rows.slice(0, 3).map(({ t, lat, lon, created, ...r }) => r);
   }
 }

@@ -3,10 +3,12 @@
 import { DurableObject } from "cloudflare:workers";
 
 // client -> relay
-const C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11;
+const C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11,
+  C_META = 16; // 12-15 reserved (phase 1/2), 17-19 reserved (phase 4, docs/design/PHASE3-4-MATCHMAKING-RESILIENCE.md)
 // relay -> client
 const S_WELCOME = 0x81, S_RPC = 0x82, S_INST = 0x83, S_DESTROY = 0x84, S_CONNECTED = 0x85, S_DISCONNECTED = 0x86,
-  S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d;
+  S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d,
+  S_COUNTDOWN = 0x95; // 0x8e-0x94 reserved (phase 4)
 // reject / close reasons
 export const R_NOT_FOUND = 1, R_BAD_PASSWORD = 2, R_FULL = 3, R_HOST_LEFT = 4, R_KICKED = 5, R_RATE = 6, R_PROTO = 7;
 
@@ -73,6 +75,15 @@ export class Room extends DurableObject {
     });
   }
 
+  // ---- read-only RPC for /api/room/:code and /api/ping/:code (never creates storage) ---------------
+  info() {
+    const m = this.meta;
+    if (!m || !this.players.has(0)) return { exists: false };
+    return { exists: true, name: m.name, type: m.type, players: this.players.size, max: m.max, pw: !!m.pw, started: !!m.started, ended: !!m.ended,
+      wave: m.wave || 0, quick: !!m.quick, full: this.players.size >= m.max || m.nextId > MAX_PLAYER_ID };
+  }
+  ping() { return 1; }
+
   // ---- connection setup -------------------------------------------------------------------
   async fetch(request) {
     const url = new URL(request.url);
@@ -99,6 +110,10 @@ export class Room extends DurableObject {
         type: (q.get("type") || "").slice(0, 40),
         pw: (q.get("pw") || "").slice(0, 20),
         comment: "", listed: false,
+        // phase 3: lobby metadata. colo/country/lat/lon come from the Worker (request.cf), never from the client.
+        colo: (q.get("colo") || "").slice(0, 8), country: (q.get("country") || "").slice(0, 2),
+        lat: Number(q.get("lat")) || 0, lon: Number(q.get("lon")) || 0,
+        wave: 0, started: false, ended: false, alive: 0, quick: false,
       };
       this.buf = []; this.byRoot.clear(); this.alive.clear(); this.bytes = 0; this.seq = 0;
       server.serializeAttachment({ id: 0, host: true, ipid, rtc });
@@ -343,6 +358,22 @@ export class Room extends DurableObject {
         emit(w, out);
         return;
       }
+      case C_META: {
+        // host only: u16 wave, u8 flags (1 started, 2 ended), u8 alive, [u8 countdown seconds, Quick Play auto start]. Malformed = ignored.
+        if (!att.host || (b.length !== 5 && b.length !== 6)) return;
+        const wave = Math.min(9999, b[1] | (b[2] << 8)), flags = b[3] & 3, alive = b[4], cd = b.length === 6 ? Math.min(60, b[5]) : 0;
+        const m = this.meta;
+        const changed = m.wave !== wave || m.started !== !!(flags & 1) || m.ended !== !!(flags & 2) || m.alive !== alive;
+        Object.assign(m, { wave, started: !!(flags & 1), ended: !!(flags & 2), alive });
+        if (cd > 0 || this.cdOn) {
+          // the host sends this every second while the countdown runs; tell everybody else (a late joiner gets the next tick)
+          const out = new Uint8Array([S_COUNTDOWN, cd]);
+          for (const [id, w] of this.players) if (id !== me) emit(w, out);
+          this.cdOn = cd > 0;
+        }
+        if (changed) { this.ctx.storage.put("meta", m); this.lobbyUpdate(); }
+        return;
+      }
       case C_LISTING: {
         if (!att.host || b.length < 3) return;
         const listed = b[1] === 1;
@@ -350,7 +381,7 @@ export class Room extends DurableObject {
         const name = dec.decode(b.subarray(3, 3 + nl)).slice(0, 40);
         const cl = b[3 + nl]; const comment = dec.decode(b.subarray(4 + nl, 4 + nl + cl)).slice(0, 60);
         const type = b.length > 4 + nl + cl ? dec.decode(b.subarray(5 + nl + cl, 5 + nl + cl + b[4 + nl + cl])).slice(0, 40) : this.meta.type;
-        Object.assign(this.meta, { listed, name: name || this.meta.name, comment, type });
+        Object.assign(this.meta, { listed, name: name || this.meta.name, comment, type, quick: comment === "Quick Play" });
         this.ctx.storage.put("meta", this.meta);
         this.lobbyUpdate();
         return;
@@ -462,7 +493,11 @@ export class Room extends DurableObject {
     const m = this.meta;
     if (!m) return;
     if (!m.listed) { this.lobby().remove(m.code).catch(() => {}); return; }
-    this.lobby().upsert({ code: m.code, name: m.name, players: this.players.size, max: m.max, type: m.type, pw: !!m.pw, comment: m.comment }).catch(() => {});
+    this.lobby().upsert({
+      code: m.code, name: m.name, players: this.players.size, max: m.max, type: m.type, pw: !!m.pw, comment: m.comment,
+      wave: m.wave || 0, started: !!m.started, ended: !!m.ended, created: m.created, colo: m.colo || "", country: m.country || "",
+      lat: m.lat || 0, lon: m.lon || 0, quick: !!m.quick,
+    }).catch(() => {});
   }
 
   async alarm() {
