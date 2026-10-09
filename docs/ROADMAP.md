@@ -23,12 +23,13 @@ Make online play feel smooth without changing the network architecture.
 - [ ] Real-network verification (home + phone hotspot, different regions) and a week of `p2p-stat` log lines to learn the real direct-connect rate; only then decide on 2b.
 - Not planned: TURN (costs money), reliable channel for RPCs.
 
-## Phase 3 — Getting into a game
-- Nickname on first launch (no accounts).
-- **Quick Play** button: join the best open room or create one.
-- Better server list: ping, players, current wave, map.
-- **Invite links**: `.../?room=ABCDE` joins directly; copy button in the lobby.
-- Settings menu: mouse sensitivity, FOV, graphics quality, volume, invert Y. Saved locally.
+## Phase 3 — Getting into a game (done, see docs/MULTIPLAYER.md "Getting into a game")
+- [x] Nickname: the original's Name field is used everywhere; asked once (before create / join / Quick Play / invite) while it is still the default.
+- [x] **Quick Play** button on the main menu: join the best open room or create a listed one; Quick Play rooms start by themselves after a visible 10 s countdown (5 s once a second player joins), normal rooms still wait for ENTER.
+- [x] Better server list: players/max, current wave, ping, region, room name; full rooms marked and sorted last; refresh every 10 s.
+- [x] **Invite links**: `.../?room=ABCDE` joins directly (build check, clean errors); copy button on the page while in a room.
+- [x] Settings: mouse sensitivity and volume (the original's), FOV, graphics quality (Low / Medium / High), invert Y. Saved locally; also from the in-game pause panel.
+- [ ] Desktop-only gate for phones (design step 7 part, lifted by Phase 5 touch controls); `/api/*` rate limits (phase 4 step 2).
 
 ## Phase 4 — Resilience
 - **Reconnect** after a short drop (keep your player for ~20 s).

@@ -16,8 +16,8 @@ The game and its assets belong to Adrian (AdrianKS, now making Zumbi Blocks 2). 
 3. Online multiplayer on Cloudflare: one player's browser hosts, a Worker + Durable Object relays (`docs/MULTIPLAYER.md`, `server/`).
 
 ## Layout
-- `game/` Unity project. `Assets/Scripts/LegacyNetworkShim.cs` + `ZbNet.cs` + `Assets/Plugins/WebGL/ZbNet.jslib` implement the old Unity networking API on top of the relay.
-- `server/` Cloudflare Worker (plain JS): serves the WebGL build, `/api/rooms`, `/ws/host`, `/ws/room/:code`, Durable Objects `Room` and `Lobby`. `server/test/relay.test.mjs` tests the relay routing. `game/Assets/WebGLTemplates/ZumbiBlocks/zbrtc.js` is the WebRTC lane (page script).
+- `game/` Unity project. `Assets/Scripts/LegacyNetworkShim.cs` + `ZbNet.cs` + `Assets/Plugins/WebGL/ZbNet.jslib` implement the old Unity networking API on top of the relay. `Assets/Scripts/ZbMenu.cs` has the phase 3 menu logic (Quick Play, invite links, nickname prompt, settings, server list columns).
+- `server/` Cloudflare Worker (plain JS): serves the WebGL build, `/api/rooms`, `/api/room/:code`, `/api/quickplay`, `/api/ping/:code`, `/ws/host`, `/ws/room/:code`, Durable Objects `Room` and `Lobby`. `server/test/relay.test.mjs` tests the relay routing. `game/Assets/WebGLTemplates/ZumbiBlocks/zbrtc.js` is the WebRTC lane (page script).
 - `docs/` notes: `RECOVERY.md` (how the project was rebuilt), `MULTIPLAYER.md` (protocol, routing, limitations), `permission/` (Adrian's OK).
 
 ## Build the game
@@ -49,6 +49,8 @@ Worker name `zumbi-blocks` on workers.dev, `account_id` is pinned in `server/wra
 Online play tries a direct browser-to-browser connection (WebRTC data channel, free public STUN servers only, no TURN) between the host and each player for the high-rate position updates. **This exposes IP addresses to the other end: the host's browser sees every player's IP and each player sees the host's.** Everything else, and everyone who cannot connect directly, goes through the Cloudflare relay as before. Add `?p2p=0` to the page address to turn it off completely. (Same note is shown on the game page.)
 
 ## How to play online
-Menu: Start Game, then Create server (give it a name of 4+ characters; "Show in server list" toggles public listing; optional password).
+**Quick Play** (first button of the main menu) joins the best open game or starts one; a Quick Play room starts by itself after a short countdown. **Invite**: while you are in a room the page shows "Copy invite link" (`https://<site>/?room=CODE`); whoever opens it joins that room. Options > All settings (also reachable with ESC > Options in a match): field of view, sensitivity, volume, graphics Low / Medium / High, invert vertical look.
+
+Manual: Start Game, then Create server (give it a name of 4+ characters; "Show in server list" toggles public listing; optional password).
 Everyone else: Join server (pick from the list) or Direct IP, where the "Room code" field takes the 5 letter code that the host sees in the top right corner of the screen.
 The host presses ENTER to start the match.
