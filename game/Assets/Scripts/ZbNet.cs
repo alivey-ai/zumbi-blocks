@@ -853,6 +853,17 @@ public class NetRunner : MonoBehaviour
         Debug.Log("ZBDUMP " + sb);
     }
 
+    // Test hooks for headless rendering checks: DebugPose("x,y,z,yaw") teleports the local player; DebugFreeze("0"|"1") sets Time.timeScale.
+    public void DebugPose(string a)
+    {
+        var f = a.Split(',');
+        foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); if (nv == null || !nv.isMine) continue;
+            var cc = p.GetComponent<CharacterController>(); if (cc != null) cc.enabled = false;
+            p.transform.position = new Vector3(float.Parse(f[0]), float.Parse(f[1]), float.Parse(f[2]));
+            p.transform.rotation = Quaternion.Euler(0f, float.Parse(f[3]), 0f); p.headang = 0f;
+            if (cc != null) cc.enabled = true; }
+    }
+    public void DebugFreeze(string a) { Time.timeScale = float.Parse(a); }
     // Test hook: turn the local player towards the nearest living zombie and level the view (lets a headless test aim).
     public void DebugAim(string unused)
     {

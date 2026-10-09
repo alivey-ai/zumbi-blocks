@@ -28,6 +28,39 @@
     .credit { margin-top: 18px; text-align: center; max-width: 760px; }
     .small { margin-top: 8px; font-size: 12px; color: #6f7b6b; text-align: center; max-width: 760px; }
   </style>
+  <script>
+    // Rendering fix (see docs/RECOVERY.md, "Rendering artifacts"): Unity's legacy Diffuse/Specular shaders draw each extra per-pixel
+    // light as a second additive pass (blend ONE,ONE, no depth write, depth func LEQUAL) over the base pass. On Apple GPUs (ANGLE/Metal)
+    // the two passes do not produce bit-identical depth, so the LEQUAL test fails on a tile/triangle-shaped part of the pixels and the
+    // surface flickers with diagonal hatching and dark blotches. Pull additive passes a hair towards the camera with a polygon offset.
+    (function () {
+      var gl = window.WebGL2RenderingContext && WebGL2RenderingContext.prototype;
+      if (!gl) return;
+      window.zbDepthFix = !/[?&]nodepthfix\b/.test(location.search); // ?nodepthfix (or window.zbDepthFix = false) turns the fix off for A/B screenshots
+      var o_enable = gl.enable, o_disable = gl.disable, o_offset = gl.polygonOffset;
+      var ONE = 1, LEQUAL = 0x0203, BLEND = 0x0BE2, DEPTH_TEST = 0x0B71, OFFSET_FILL = 0x8037;
+      var blend = false, depthTest = false, depthMask = true, depthFunc = 0x0201, src = ONE, dst = 0;
+      function wrap(name, fn) { var o = gl[name]; if (o) gl[name] = function () { fn.apply(this, arguments); return o.apply(this, arguments); }; }
+      wrap("enable", function (c) { if (c === BLEND) blend = true; else if (c === DEPTH_TEST) depthTest = true; });
+      wrap("disable", function (c) { if (c === BLEND) blend = false; else if (c === DEPTH_TEST) depthTest = false; });
+      wrap("depthMask", function (m) { depthMask = m; });
+      wrap("depthFunc", function (f) { depthFunc = f; });
+      wrap("blendFunc", function (s, d) { src = s; dst = d; });
+      wrap("blendFuncSeparate", function (s, d) { src = s; dst = d; });
+      ["drawElements", "drawArrays", "drawElementsInstanced", "drawArraysInstanced", "drawRangeElements"].forEach(function (name) {
+        var o = gl[name]; if (!o) return;
+        gl[name] = function () {
+          if (window.zbDepthFix && blend && depthTest && !depthMask && depthFunc === LEQUAL && src === ONE && dst === ONE) {
+            o_enable.call(this, OFFSET_FILL); o_offset.call(this, -1, -2);
+            var r = o.apply(this, arguments);
+            o_disable.call(this, OFFSET_FILL);
+            return r;
+          }
+          return o.apply(this, arguments);
+        };
+      });
+    })();
+  </script>
 </head>
 <body>
   <h1>Zumbi Blocks</h1>
