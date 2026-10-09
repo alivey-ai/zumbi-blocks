@@ -2,7 +2,7 @@ import { chromium } from "playwright-core";
 export async function launch() {
   return chromium.launch({ headless: true, channel: process.env.CH || undefined, args: process.env.CH ? ["--use-angle=metal", "--ignore-gpu-blocklist", "--enable-gpu-rasterization", "--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-webgl", "--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns"] });
 }
-export async function game(b, name, base = "http://localhost:8787/") {
+export async function game(b, name, base = "http://localhost:8787/", opts = {}) {
   const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } });
   const p = await ctx.newPage();
   p.name = name; p.logs = [];
@@ -18,9 +18,19 @@ export async function game(b, name, base = "http://localhost:8787/") {
   await p.goto(base);
   await p.waitForFunction(() => document.querySelector("#loading").style.display === "none", null, { timeout: 120000 });
   await p.waitForTimeout(1500);
+  // A fresh profile is asked for a nickname before hosting / joining (phase 3). Tests that are not about that skip the prompt.
+  if (!opts.fresh) await p.evaluate(() => window.unityInstance.SendMessage("ZbNetRunner", "DebugSkipNick", ""));
   p.click_ = async (x, y) => { const r = await p.evaluate(() => { const r = document.querySelector("#unity-canvas").getBoundingClientRect(); return { x: r.x, y: r.y }; }); await p.mouse.move(r.x + x, r.y + y); await p.waitForTimeout(80); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); await p.waitForTimeout(400); };
   p.dump = async () => { const n = p.logs.length; await p.evaluate(() => window.unityInstance.SendMessage("ZbNetRunner", "DebugDump", "")); for (let i = 0; i < 40; i++) { await p.waitForTimeout(100); const l = p.logs.slice(n).find((x) => x.startsWith("ZBDUMP ")); if (l) return JSON.parse(l.slice(7)); } return null; };
   const ask = async (msg, prefix, tries = 60) => { const n = p.logs.length; await p.evaluate((m) => window.unityInstance.SendMessage("ZbNetRunner", m, ""), msg); for (let i = 0; i < tries; i++) { await p.waitForTimeout(100); const l = p.logs.slice(n).find((x) => x.startsWith(prefix)); if (l) return JSON.parse(l.slice(prefix.length)); } return null; };
+  p.menu = () => ask("DebugMenu", "ZBMENU ");                  // phase 3: menu state, countdown, server list as the game sees it
+  p.prefs = () => ask("DebugPrefs", "ZBPREFS ");               // what the game holds of its saved settings (nick, volume, fov, invert Y, quality ...)
+  p.reloadGame = async (skipNick = true) => {                   // F5: same browser profile, so PlayerPrefs come back from IndexedDB
+    await p.reload();
+    await p.waitForFunction(() => document.querySelector("#loading").style.display === "none", null, { timeout: 120000 });
+    await p.waitForTimeout(1500);
+    if (skipNick) await p.evaluate(() => window.unityInstance.SendMessage("ZbNetRunner", "DebugSkipNick", ""));
+  };
   p.statsDump = () => ask("StatsDump", "ZBSTATS ");           // cumulative traffic / rtt / interpolation counters of this page
   p.sampleStart = () => p.evaluate(() => window.unityInstance.SendMessage("ZbNetRunner", "SampleStart", ""));
   p.sampleStop = async () => { // per-frame positions of every player / zombie that moved: [{id, mine, z, t0, p:[dt,x,z,...]}]
