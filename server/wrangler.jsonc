@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zumbi-blocks",
+  "account_id": "c7d9cc74b0354c939de1012aebe158cb",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "../game/Build/WebGL",
+    "binding": "ASSETS",
+    // The Worker handles /Build/* (adds Content-Encoding for the Unity .br files), /api/* and /ws/*.
+    "run_worker_first": ["/Build/*", "/api/*", "/ws/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "Room" },
+      { "name": "LOBBY", "class_name": "Lobby" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "Lobby"] }],
+  "observability": { "enabled": true }
+}

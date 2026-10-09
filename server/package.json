@@ -1,0 +1,14 @@
+{
+  "name": "zumbi-blocks-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node test/relay.test.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.149.0",
+    "ws": "^8.18.0"
+  }
+}
