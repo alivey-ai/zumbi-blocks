@@ -170,6 +170,10 @@ public class sc_gamecontrol : MonoBehaviour
 
 	public Transform elmanequim;
 
+	public int mane_w;
+
+	public int mane_h;
+
 	public int mane_up_cont;
 
 	public Transform itempivofab;
@@ -606,6 +610,8 @@ public class sc_gamecontrol : MonoBehaviour
 		{
 			Object.Destroy((Object)(object)((Component)elmanequim).gameObject);
 		}
+		mane_w = Screen.width; // WebGL port: remember the screen size the mannequin was placed for
+		mane_h = Screen.height;
 		elmanequim = (Transform)Object.Instantiate((Object)(object)manequimfab, ((Component)this).transform.position, ((Component)this).transform.rotation);
 		Ray val = ((Component)cam).GetComponent<Camera>().ScreenPointToRay(new Vector3(120f, (float)(Screen.height - 340), 1f));
 		float num = Vector2.Distance(new Vector2(0f, 0f), new Vector2((float)Screen.height, (float)Screen.width));
@@ -3445,6 +3451,10 @@ public class sc_gamecontrol : MonoBehaviour
 		if (sharedhud != 1)
 		{
 			return;
+		}
+		if ((Object)(object)elmanequim != (Object)null && (Screen.width != mane_w || Screen.height != mane_h))
+		{
+			update_manequim(); // WebGL port: page fullscreen / resize changed the screen size, place the mannequin again (the original's fullscreen button did this via mane_up_cont)
 		}
 		if ((Object)(object)elmanequim != (Object)null && !((Component)elmanequim).gameObject.activeSelf)
 		{
