@@ -45,3 +45,12 @@ Make online play feel smooth without changing the network architecture.
 - Brand it **Zumbi Blocks Classic** with Adrian; "Play Zumbi Blocks 2 on Steam" in the main menu.
 - List it on web game portals (itch.io, Y8, CrazyGames, Poki) — this is where the original audience came from.
   - Prereqs: Adrian's written OK for portals specifically + agreement on ad revenue (ideally he submits under his account, or revenue goes to/split with him); CrazyGames SDK (portal build only); smaller initial download; desktop-only gate for mobile visitors.
+
+## Backlog (from playtesting)
+- **Appearance screen shows no character.** Name / skin / beard / beard color / shirt color pickers on a black screen; the empty right half suggests the original showed a 3D preview of the player there. First check whether the original menu scene had a preview camera/model that broke in the port (bug), otherwise add one: live 3D player model on the right that updates as you change each option, slowly rotating.
+- **Saves must survive closing the tab.** Original `sc_gamecontrol.save()` writes money, inventory, nickname, look and settings to PlayerPrefs but never calls `PlayerPrefs.Save()`; on WebGL verify persistence after tab close and add the flush if needed.
+- **Missing effects:** rifle muzzle flash, flare (Rflare_out), RPG smoke (shotRPG) used Unity 4 legacy particles, removed in Unity 6. Rebuild them with the Particle System to look like the originals.
+- **Multiplayer airdrop bag on clients:** e2e saw 0 bags on the client side; confirm whether clients actually see the dropped bag.
+- **Live e2e shooting checks failed once (3/42)** after the Phase 2 deploy; rerun and confirm flake vs real.
+- **Phase 2b:** client to host state over the data channel (the real Durable Object cost cut); check relay `p2p-stat` logs for the real-world direct-connect rate.
+- **Cloud "save code" (later, only if asked for):** short code like ZB-7K2M-Q9 to move a save between browsers, stored in D1, no accounts.
