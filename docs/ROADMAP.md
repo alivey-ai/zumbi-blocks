@@ -47,8 +47,8 @@ Make online play feel smooth without changing the network architecture.
   - Prereqs: Adrian's written OK for portals specifically + agreement on ad revenue (ideally he submits under his account, or revenue goes to/split with him); CrazyGames SDK (portal build only); smaller initial download; desktop-only gate for mobile visitors.
 
 ## Backlog (from playtesting)
-- **Appearance screen shows no character.** Name / skin / beard / beard color / shirt color pickers on a black screen; the empty right half suggests the original showed a 3D preview of the player there. First check whether the original menu scene had a preview camera/model that broke in the port (bug), otherwise add one: live 3D player model on the right that updates as you change each option, slowly rotating.
-- **Saves must survive closing the tab.** Original `sc_gamecontrol.save()` writes money, inventory, nickname, look and settings to PlayerPrefs but never calls `PlayerPrefs.Save()`; on WebGL verify persistence after tab close and add the flush if needed.
+- ~~**Appearance screen shows no character.**~~ DONE. The original shows a 3D mannequin in the left sidebar (`sc_gamecontrol.update_manequim`, `sc_manequim`), not on the right. It works at the default 1280x720; the web page's Fullscreen button changes the screen size without re-placing it, so it drifted over the sidebar / off screen. Now re-placed when the screen size changes (docs/img/appearance-*-fullscreen.png).
+- ~~**Saves must survive closing the tab.**~~ DONE: `PlayerPrefs.Save()` at the end of `save()`; test `server/test/e2e/save.mjs`.
 - **Missing effects:** rifle muzzle flash, flare (Rflare_out), RPG smoke (shotRPG) used Unity 4 legacy particles, removed in Unity 6. Rebuild them with the Particle System to look like the originals.
 - **Multiplayer airdrop bag on clients:** e2e saw 0 bags on the client side; confirm whether clients actually see the dropped bag.
 - **Live e2e shooting checks failed once (3/42)** after the Phase 2 deploy; rerun and confirm flake vs real.
