@@ -1,6 +1,6 @@
 # Phase 2: WebRTC fast lane (judged plan)
 
-Status: design only. Hard rule: gameplay stays exactly v0.7. Only the carrier of already-compact state messages changes; the WebSocket relay stays the reference path and the fallback for everything.
+Status: steps 1-6 (release 2a) implemented, see docs/MULTIPLAYER.md "Data channel lane" for what shipped and measured (deviations: when every client is on the channel the host skips its WebSocket state copy, the host can clear a client's relay flag, `stat` telemetry message, 6 attempts max). Steps 7-9 not done (TURN is excluded by the $0 cost rule). Original text: design only. Hard rule: gameplay stays exactly v0.7. Only the carrier of already-compact state messages changes; the WebSocket relay stays the reference path and the fallback for everything.
 
 Verified against code at time of judging (`server/src/room.js`, `ZbNet.cs`, `ZbNet.jslib`): `webSocketMessage` returns early on string frames (text frames are free for signaling); `handle()` `C_STATE` fans out to every player except the sender (single place for a lane switch); `S_TIME(sender, stamp)` is prepended per recipient frame by the relay; `C_ECHO` routing already enforces "client may only target host"; `PROTO = 2`; `ZbNet.Queue/StampFrame/FlushOut` build one frame per game frame; `ZbInterp.Feed` already drops snapshots with `t <= last.t`.
 

@@ -9,3 +9,7 @@ CH=chrome node e2e.mjs                            # BASE=https://zumbi-blocks.vi
 `CH=chrome` uses the installed Google Chrome with GPU rendering (needed for a playable frame rate; software GL is too slow and
 the game's remote-player interpolation diverges at very low fps). Clicks use fixed canvas coordinates of the original menus.
 Zombies can kill idle test players, so rarely a check is flaky; rerun.
+
+With the WebRTC lane (phase 2) the headless Chrome gets `--disable-features=WebRtcHideLocalIpsWithMdns` (see `lib.mjs`) so local ICE candidates work. `e2e.mjs` checks the channel when the page has it on (D joins with `?p2p=0` to make a mixed room); run it also with `BASE=http://localhost:8787/?p2p=0`.
+`fallback.mjs` sabotages the lane (stalled channel, dropped channel with `?p2p=drop`, blocked ICE with `?p2p=block`) and checks that play continues on the WebSocket and that the lane recovers.
+`measure.mjs` also prints `DO-MSGS`: WebSocket frames per second the pages send, i.e. what the Durable Object receives (compare `?p2p=0` with the default).

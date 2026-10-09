@@ -49,9 +49,12 @@ await B.click_(750, 281); await B.click_(750, 381); await B.waitForTimeout(1500)
 await B.click_(400, 45); await B.click_(750, 561); await B.waitForTimeout(5000);
 console.log("B", JSON.stringify(await B.dump()));
 await A.click_(640, 360); await A.keyboard.press("Enter"); await A.waitForTimeout(12000);
+// zombies eat idle players within seconds and a dead player stops moving: keep both alive for the whole measurement
+for (const p of [A, B]) await p.evaluate(() => setInterval(() => window.unityInstance.SendMessage("ZbNetRunner", "DebugHeal", ""), 500));
 console.log("started match; zombies A/B", (await A.dump()).zombies, (await B.dump()).zombies);
 
 for (const p of [A, B]) { p.net.sent = newStats(); p.net.recv = newStats(); }
+const w0 = { A: { ...A.wsFrames }, B: { ...B.wsFrames } };
 console.log('reset stats');
 const s0 = { A: await A.statsDump(), B: await B.statsDump() };
 console.log('s0 done'); await A.sampleStart(); await B.sampleStart(); console.log('sampling');
@@ -61,6 +64,7 @@ const walk = async (p, k1, k2) => { while (Date.now() - t0 < WINDOW) { await p.k
 const shoot = async () => { while (Date.now() - t0 < WINDOW) { await B.mouse.down(); await B.waitForTimeout(400); await B.mouse.up(); await B.waitForTimeout(1600); } };
 await Promise.all([walk(A, "w", "s"), walk(B, "a", "d"), shoot()]);
 const secs = (Date.now() - t0) / 1000;
+const w1 = { A: { ...A.wsFrames }, B: { ...B.wsFrames } };
 console.log('window done');
 const s1 = { A: await A.statsDump(), B: await B.statsDump() };
 console.log('s1 done');
@@ -80,9 +84,16 @@ for (const p of [A, B]) for (const dir of ["sent", "recv"]) {
     stateIntervalMs: { n: iv.length, mean: +mean.toFixed(1), sd: +sd.toFixed(1), p50: pct(iv, 0.5), p95: pct(iv, 0.95) }, top,
   };
 }
+// Cost metric: every WebSocket frame a page sends is one message the Durable Object receives (billed as requests at 20:1 on the paid plan,
+// counted against the free quota); frames the DO sends to pages are free. Text frames are the WebRTC signaling and lane flags.
+{
+  const d = (k, f) => w1[k][f] - w0[k][f];
+  const doIn = d("A", "sent") + d("B", "sent"), doOut = d("A", "recv") + d("B", "recv");
+  console.log("DO-MSGS", JSON.stringify({ doReceivesPerS: +(doIn / secs).toFixed(1), fromHostPerS: +(d("A", "sent") / secs).toFixed(1), fromClientPerS: +(d("B", "sent") / secs).toFixed(1), doSendsPerS: +(doOut / secs).toFixed(1), textFrames: d("A", "sentText") + d("B", "sentText") }));
+}
 console.log("window", secs.toFixed(1), "s", "BASE", BASE);
 console.log("TRAFFIC", JSON.stringify(out));
-const ov = (k) => { const a = s0[k], z = s1[k]; if (!a || !z) return null; const dt = (z.t - a.t) / 1000; return { fps: z.fps, rxKBps: +((z.rx.bytes - a.rx.bytes) / 1024 / dt).toFixed(1), rxMsgsPerS: +((z.rx.msgs - a.rx.msgs) / dt).toFixed(1), rxFramesPerS: +((z.rx.frames - a.rx.frames) / dt).toFixed(1), txKBps: +((z.tx.bytes - a.tx.bytes) / 1024 / dt).toFixed(1), txMsgsPerS: +((z.tx.msgs - a.tx.msgs) / dt).toFixed(1), rtt: z.rtt, clockJitter: z.clockJitter, relayPing: z.relayPing, interp: z.interp, backlog: z.backlog, cfg: z.cfg }; };
+const ov = (k) => { const a = s0[k], z = s1[k]; if (!a || !z) return null; const dt = (z.t - a.t) / 1000; return { fps: z.fps, rxKBps: +((z.rx.bytes - a.rx.bytes) / 1024 / dt).toFixed(1), rxMsgsPerS: +((z.rx.msgs - a.rx.msgs) / dt).toFixed(1), rxFramesPerS: +((z.rx.frames - a.rx.frames) / dt).toFixed(1), txKBps: +((z.tx.bytes - a.tx.bytes) / 1024 / dt).toFixed(1), txMsgsPerS: +((z.tx.msgs - a.tx.msgs) / dt).toFixed(1), rtt: z.rtt, clockJitter: z.clockJitter, relayPing: z.relayPing, interp: z.interp, backlog: z.backlog, cfg: z.cfg, p2p: z.p2p && { rxMsgs: z.p2p.rxMsgs - (a.p2p ? a.p2p.rxMsgs : 0), txMsgs: z.p2p.txMsgs - (a.p2p ? a.p2p.txMsgs : 0), links: z.p2p.links, flips: z.p2p.flips } }; };
 console.log("OVERLAY-STATS", JSON.stringify({ A: ov("A"), B: ov("B") }, null, 1));
 
 // Trajectory fidelity: what a remote peer rendered vs what the owner actually did (same wall clock). For every entity that

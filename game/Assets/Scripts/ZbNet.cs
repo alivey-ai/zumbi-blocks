@@ -488,7 +488,7 @@ public static class ZbNet
 
     // ---- data channel lane (host -> client state) ----------------------------------------------------
     static byte[] fastBuf = new byte[16384];
-    static int fastLen;
+    static int fastLen; static uint fastStamp;
     static bool fastAny, fastAll;          // host: some / every connected peer has its data channel up (refreshed each Tick)
     static bool ctxViaDc; static int dcPeer; // the frame being processed came over the data channel from this peer
     static readonly Dictionary<int, bool> laneUp = new Dictionary<int, bool>();
@@ -497,6 +497,7 @@ public static class ZbNet
     static void QueueFast()
     {
         int need = 2 + w.n;
+        if (fastLen == 0) fastStamp = (uint)(long)ZbWs.Now(); // same convention as StampFrame: the time the frame's first message was produced
         if (fastLen + need > 262144) return; // peers that cannot keep up lose the oldest-never-sent: state is latest-wins
         if (fastLen + need > fastBuf.Length) Array.Resize(ref fastBuf, Math.Max(fastBuf.Length * 2, fastLen + need));
         fastBuf[fastLen++] = (byte)w.n; fastBuf[fastLen++] = (byte)(w.n >> 8);
@@ -512,7 +513,7 @@ public static class ZbNet
         if (fastLen == 0) return;
         if (fastAny)
         {
-            uint ms = (uint)(long)ZbWs.Now();
+            uint ms = fastStamp;
             int o = 0;
             while (o < fastLen)
             {
@@ -1117,6 +1118,9 @@ public class NetRunner : MonoBehaviour
             sb.Append(first ? "" : ",").Append("\"").Append(kv.Key).Append("\":").Append(Math.Round(kv.Value.jitter, 1));
             first = false;
         }
+        sb.Append("},\"clockOffset\":{");
+        first = true;
+        foreach (var kv in ZbSync.clocks) { sb.Append(first ? "" : ",").Append("\"").Append(kv.Key).Append("\":").Append(Math.Round(kv.Value.offset, 1)); first = false; }
         sb.Append("},\"relayPing\":").Append(ZbNet.myPing);
         sb.Append(",\"interp\":{\"on\":").Append(ZbCfg.interp ? 1 : 0).Append(",\"entities\":").Append(ZbSync.interps.Count).Append(",\"snaps\":").Append(ZbSync.snaps)
           .Append(",\"frames\":").Append(ZbSync.framesSampled).Append(",\"extrap\":").Append(ZbSync.framesExtrap).Append(",\"starved\":").Append(ZbSync.framesStarved)

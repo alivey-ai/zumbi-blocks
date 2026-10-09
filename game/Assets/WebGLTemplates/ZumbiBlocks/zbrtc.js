@@ -296,6 +296,7 @@
   function rawSend(P, buf, countData) {
     var dc = P.dc;
     if (!dc || dc.readyState !== 'open') return false;
+    if (Z.stalled) return true;
     var doSend = function () { try { if (!P.torn && dc.readyState === 'open') dc.send(buf); } catch (e) {} };
     if (!simOn) doSend();
     else { var t = now(), at = Math.max(P.lastSendAt, t + simDelay()); P.lastSendAt = at; setTimeout(doSend, Math.max(0, at - t)); }
@@ -304,6 +305,7 @@
   }
 
   function onData(P, e) {
+    if (Z.stalled) return;
     var t = now();
     P.lastRx = t;
     if (!(e.data instanceof ArrayBuffer) || e.data.byteLength < 3) return;
@@ -317,6 +319,9 @@
     Z.rx.push({ t: at, d: new Uint8Array(e.data), peer: P.id });
   }
 
+  // test hook: window.zbrtc.stall(true) makes this page's channel silently swallow everything (both directions), like a dead network path
+  Z.stalled = false;
+  Z.stall = function (on) { Z.stalled = !!on; log('TEST: channel ' + (on ? 'stalled' : 'released')); };
   Z.closePeer = function (id) { var P = Z.peers[id]; if (P) { teardown(P, true); delete Z.peers[id]; } };
 
   // --- API used by the jslib shims ------------------------------------------------------------
