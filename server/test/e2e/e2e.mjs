@@ -5,6 +5,10 @@ const BASE0 = process.env.BASE || "http://localhost:8787/";
 const NETSIM = process.env.NETSIM || "0";
 const BASE = NETSIM !== "0" ? BASE0 + (BASE0.includes("?") ? "&" : "?") + "netsim=" + NETSIM : BASE0;
 const LEGACY = /legacy=1/.test(BASE);
+// p2p (WebRTC fast lane) is on unless the base URL says ?p2p=0. With it on, D (the late joiner) joins with ?p2p=0 on purpose: a mixed room
+// (host + two data channel clients + one WebSocket-only client) must keep every peer's zombies in agreement.
+const P2P = !/[?&]p2p=0/.test(BASE);
+const withQ = (u, q) => u + (u.includes("?") ? "&" : "?") + q;
 console.log("e2e BASE", BASE, "NETSIM", NETSIM);
 const b = await launch();
 let pass = 0, fail = 0;
@@ -85,7 +89,7 @@ check("B's avatar position matches on host (or B died: skipped)", !bOnB || !bOnA
 
 // --- feel layer: stats overlay, host round trip, compact state, interpolation, instant local shooting feedback ---
 {
-  const sA = await A.statsDump(), sB = await B.statsDump();
+  const sA = await A.statsDump(), sB = await B.statsDump(), sC0 = await C.statsDump();
   console.log("stats A", J(sA)); console.log("stats B", J(sB));
   check("stats dump works on host and client", !!sA && !!sB);
   const rttB = sB && sB.rtt && sB.rtt["0"];
@@ -97,12 +101,22 @@ check("B's avatar position matches on host (or B died: skipped)", !bOnB || !bOnA
   }
   check("sender clock / jitter tracked for the host", sB && sB.clockJitter && sB.clockJitter["0"] !== undefined, J(sB && sB.clockJitter));
   if (!LEGACY) {
-    check("state travels as compact messages (S_STATE 0x8d)", (B.stats.recv[0x8d] || 0) > 100 && (A.stats.sent[11] || 0) > 100, J([B.stats.recv[0x8d], A.stats.sent[11]]));
+    if (!P2P) check("state travels as compact messages (S_STATE 0x8d)", (B.stats.recv[0x8d] || 0) > 100 && (A.stats.sent[11] || 0) > 100, J([B.stats.recv[0x8d], A.stats.sent[11]]));
+    else {
+      const rA = await A.rtc(), rB = await B.rtc(), rC = await C.rtc();
+      check("data channel up host<->B and host<->C (direct, local candidates)", rA && rA.peers[1] && rA.peers[1].up && rA.peers[2] && rA.peers[2].up && rB.peers[0] && rB.peers[0].up && rC.peers[0] && rC.peers[0].up, J([rA, rB, rC]));
+      check("state travels over the data channel (client got compact state messages there)", sB.p2p && sB.p2p.rxMsgs > 300 && sC0.p2p.rxMsgs > 300, J([sB.p2p, sC0.p2p]));
+      check("WebSocket carries (almost) no host state to a DC client (relay skips it)", (B.stats.recv[0x8d] || 0) < 0.1 * sB.p2p.rxMsgs, J([B.stats.recv[0x8d], sB.p2p.rxMsgs]));
+      check("host WebSocket carries no state while every client is on the channel", (A.stats.sent[11] || 0) < 0.1 * sA.p2p.txMsgs, J([A.stats.sent[11], sA.p2p.txMsgs]));
+      check("stats overlay link status: DC with an RTT", sB.p2p.links["0"] && sB.p2p.links["0"].up === 1 && sB.p2p.links["0"].rtt >= 0, J(sB.p2p.links));
+      check("RTT over the channel is measured by the game echo too", sB.rtt["0"] && sB.rtt["0"].n >= 3, J(sB.rtt));
+    }
     check("interpolation active on the client", sB.interp.on === 1 && sB.interp.entities > 0 && sB.interp.snaps > 100, J(sB.interp));
     check("interpolation is not starved or teleporting", sB.interp.frames > 0 && sB.interp.starved / sB.interp.frames < 0.05 && sB.interp.teleports < 10, J(sB.interp));
     check("interpolation delay adapted to a sane value (100..350 ms)", sB.interp.avgDelay >= 99 && sB.interp.avgDelay <= 350, J(sB.interp.avgDelay));
   }
-  check("frames carry several messages (batching)", (sB.rx.msgs / Math.max(1, sB.rx.frames)) > 1.5 && (sA.tx.msgs / Math.max(1, sA.tx.frames)) > 1.5, J([sB.rx, sA.tx]));
+  if (!P2P) check("frames carry several messages (batching)", (sB.rx.msgs / Math.max(1, sB.rx.frames)) > 1.5 && (sA.tx.msgs / Math.max(1, sA.tx.frames)) > 1.5, J([sB.rx, sA.tx]));
+  else check("data channel messages carry several state messages (batching / chunks)", sB.p2p.rxMsgs / Math.max(1, sB.p2p.rxFrames) > 1.5, J(sB.p2p));
   // F3 overlay toggle
   await B.keyboard.press("F3"); await B.waitForTimeout(600);
   const on = await B.statsDump(); await B.shot("b_overlay_on.png");
@@ -112,7 +126,7 @@ check("B's avatar position matches on host (or B died: skipped)", !bOnB || !bOnA
 }
 
 // --- late join (D) ---
-const D = await game(b, "D", BASE);
+const D = await game(b, "D", P2P ? withQ(BASE, "p2p=0") : BASE);
 await D.click_(750, 281); await D.click_(750, 431); await D.waitForTimeout(800);
 await D.click_(850, 265); await D.keyboard.press("Control+a"); await D.keyboard.type(code.toLowerCase(), { delay: 30 });
 await D.click_(750, 431); await D.waitForTimeout(6000);
@@ -121,6 +135,14 @@ check("late joiner D connected (lowercase code works)", dd && dd.mode === "clien
 check("late joiner sees zombies like the host", dd.zombies > 0 && Math.abs(dd.zombies - da.zombies) <= 3, J([dd.zombies, da.zombies]));
 check("late joiner sees the same players as the host (zombies may have killed some)", da.remote === 3 && dd.players.length === da.players.length, J([da.remote, dd.players.length, da.players.length]));
 await D.shot("d_late.png");
+if (P2P) {
+  await D.waitForTimeout(2000);
+  const a2 = (await A.dump()).zpos, d2 = (await D.dump()).zpos, b2 = (await B.dump()).zpos;
+  const sameD = a2.filter((p) => d2.includes(p)).length, sameB = a2.filter((p) => b2.includes(p)).length;
+  check("mixed room: WebSocket-only D and DC client B both agree with the host on zombie positions", a2.length > 0 && sameD >= a2.length * 0.6 && sameB >= a2.length * 0.6, J([a2.length, sameD, sameB]));
+  const rD = await D.rtc();
+  check("D (?p2p=0) never opened a data channel", rD && rD.enabled === false && Object.keys(rD.peers).length === 0, J(rD));
+}
 
 // --- client leaves (C closes the tab) ---
 const beforeC = (await A.dump()).players.filter((p) => p.owner === 2).length;

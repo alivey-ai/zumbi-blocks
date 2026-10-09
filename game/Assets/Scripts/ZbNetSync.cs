@@ -16,6 +16,8 @@ using UnityEngine;
 public static class ZbCfg
 {
     public static bool interp = true, compact = true, statsOn;
+    public static bool p2p = true;         // ?p2p=0 turns the WebRTC fast lane off (kill switch); "drop" / "block" are test hooks handled in zbrtc.js
+    public static string p2pMode = "";
     public static float rate = 30f;        // value for sc_player.sendrate / sc_zumbi.sendrate (the original used 10 = 8..10 updates/s)
     public static float minDelay = 100f;   // ms, interpolation delay floor
     public static string query = "";
@@ -40,6 +42,7 @@ public static class ZbCfg
                 case "rate": if (float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out f)) rate = f; break;
                 case "delay": if (float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out f)) minDelay = f; break;
                 case "stats": statsOn = v == "1"; break;
+                case "p2p": p2pMode = v; p2p = v != "0"; break;
             }
         }
     }
@@ -87,6 +90,9 @@ public sealed class ZbClock
         lastQueue = transit - offset;
     }
     double lastTransit;
+    // The lane that feeds this clock changed (WebSocket <-> data channel): forget the old path's minima but keep the offset, which then
+    // follows the new path at the usual slow slew instead of jumping.
+    public void Reset() { Array.Clear(binSec, 0, binSec.Length); jitter = Math.Min(jitter, 5.0); }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -103,6 +109,8 @@ public static class ZbSync
 
     // cumulative traffic (WebSocket payload bytes; messages = protocol messages inside the frames)
     public static long rxMsgs, rxBytes, rxFrames, txMsgs, txBytes, txFrames;
+    // the same for the WebRTC data channel lane (frames = data channel messages)
+    public static long dcRxFrames, dcRxBytes, dcRxMsgs, dcTxMsgs, dcTxFrames, dcTxBytes, laneFlips;
     public static readonly Dictionary<byte, long> txByOp = new Dictionary<byte, long>(), rxByOp = new Dictionary<byte, long>();
     // interpolation counters
     public static long snaps, framesSampled, framesExtrap, framesStarved, teleports;
@@ -131,16 +139,16 @@ public static class ZbSync
     }
 
     // ---- rolling rates (last ~5 s) -----------------------------------------------------------------
-    struct Snap { public double t; public long rxM, rxB, rxF, txM, txB, txF, snaps; }
+    struct Snap { public double t; public long rxM, rxB, rxF, txM, txB, txF, snaps, dRxB, dRxM, dTxB, dTxM; }
     static readonly Snap[] ring = new Snap[8];
     static int ringN; static double lastRing;
-    public static double rateRxMsgs, rateRxBytes, rateRxFrames, rateTxMsgs, rateTxBytes, rateTxFrames, rateSnaps;
+    public static double rateRxMsgs, rateRxBytes, rateRxFrames, rateTxMsgs, rateTxBytes, rateTxFrames, rateSnaps, rateDcRxBytes, rateDcRxMsgs, rateDcTxBytes, rateDcTxMsgs;
     public static void TickRates()
     {
         double t = Time.realtimeSinceStartupAsDouble;
         if (t - lastRing < 1.0) return;
         lastRing = t;
-        var s = new Snap { t = t, rxM = rxMsgs, rxB = rxBytes, rxF = rxFrames, txM = txMsgs, txB = txBytes, txF = txFrames, snaps = snaps };
+        var s = new Snap { t = t, rxM = rxMsgs, rxB = rxBytes, rxF = rxFrames, txM = txMsgs, txB = txBytes, txF = txFrames, snaps = snaps, dRxB = dcRxBytes, dRxM = dcRxMsgs, dTxB = dcTxBytes, dTxM = dcTxMsgs };
         ring[ringN % ring.Length] = s; ringN++;
         int count = Math.Min(ringN, ring.Length);
         if (count < 2) return;
@@ -149,6 +157,7 @@ public static class ZbSync
         rateRxMsgs = (s.rxM - old.rxM) / dt; rateRxBytes = (s.rxB - old.rxB) / dt; rateRxFrames = (s.rxF - old.rxF) / dt;
         rateTxMsgs = (s.txM - old.txM) / dt; rateTxBytes = (s.txB - old.txB) / dt; rateTxFrames = (s.txF - old.txF) / dt;
         rateSnaps = (s.snaps - old.snaps) / dt;
+        rateDcRxBytes = (s.dRxB - old.dRxB) / dt; rateDcRxMsgs = (s.dRxM - old.dRxM) / dt; rateDcTxBytes = (s.dTxB - old.dTxB) / dt; rateDcTxMsgs = (s.dTxM - old.dTxM) / dt;
     }
 
     // ---- state feed (called by ZbNet for every delivered RPC / state message) -------------------------

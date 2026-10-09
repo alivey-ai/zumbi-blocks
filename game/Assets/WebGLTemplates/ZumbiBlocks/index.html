@@ -28,6 +28,7 @@
     .credit { margin-top: 18px; text-align: center; max-width: 760px; }
     .small { margin-top: 8px; font-size: 12px; color: #6f7b6b; text-align: center; max-width: 760px; }
   </style>
+  <script src="zbrtc.js"></script>
   <script>
     // Rendering fix (see docs/RECOVERY.md, "Rendering artifacts"): Unity's legacy Diffuse/Specular shaders draw each extra per-pixel
     // light as a second additive pass (blend ONE,ONE, no depth write, depth func LEQUAL) over the base pass. On Apple GPUs (ANGLE/Metal)
@@ -75,6 +76,7 @@
   </div>
   <p class="credit">Zumbi Blocks by Adrian (AdrianKS) &mdash; <a href="https://store.steampowered.com/app/1941780/Zumbi_Blocks_2_Open_Alpha/" target="_blank" rel="noopener">play Zumbi Blocks 2 on Steam</a></p>
   <p class="small">Unofficial web revival of the original 2013 game, hosted with the author's permission.</p>
+  <p class="small">Privacy: online play uses a direct browser-to-browser connection (WebRTC) between you and the host when it can, so the host's browser can see your IP address and you can see theirs. Add <code>?p2p=0</code> to the address to turn it off (everything then goes through the relay server).</p>
 
   <script>
     var canvas = document.querySelector("#unity-canvas");

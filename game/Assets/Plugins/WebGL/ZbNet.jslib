@@ -13,13 +13,16 @@ mergeInto(LibraryManager.library, {
     var ns = (/[?&]netsim=([0-9.]+)(?:,([0-9.]+))?/.exec(location.search) || []);
     s.simD = (parseFloat(ns[1]) || 0) / 2; s.simJ = (parseFloat(ns[2]) || 0) / 2;
     s.sim = s.simD > 0 || s.simJ > 0;
+    if (window.zbrtc) { try { window.zbrtc.attach(s); } catch (e) {} }
     var base = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
     var ws;
     try { ws = new WebSocket(base + path); } catch (e) { s.state = 3; s.ws = null; return; }
     ws.binaryType = 'arraybuffer';
     ws.onopen = function () { if (s.ws === ws) s.state = 2; };
     ws.onmessage = function (e) {
-      if (s.ws !== ws || !(e.data instanceof ArrayBuffer)) return;
+      if (s.ws !== ws) return;
+      if (typeof e.data === 'string') { if (window.zbrtc) window.zbrtc.onText(e.data); return; } // WebRTC signaling (zbrtc.js)
+      if (!(e.data instanceof ArrayBuffer)) return;
       var now = performance.now();
       var at = now;
       if (s.sim) {
@@ -86,9 +89,19 @@ mergeInto(LibraryManager.library, {
   ZbWsClose: function () {
     var s = window.__zbws;
     if (!s) return;
+    if (window.zbrtc) { try { window.zbrtc.detach(); } catch (e) {} }
     if (s.ws) { try { s.ws.onclose = null; s.ws.close(); } catch (e) {} }
     s.ws = null; s.state = 0; s.queue = []; s.closed = false; s.pendingOut = 0;
   },
+  // ---- WebRTC fast lane (zbrtc.js in the page template): host->client state and echo probes. All polled, no callbacks. ----
+  ZbRtcPeerUp: function (id) { return window.zbrtc ? window.zbrtc.peerUp(id) : 0; },
+  ZbRtcAnyUp: function () { return window.zbrtc ? window.zbrtc.anyUp() : 0; },
+  ZbRtcSend: function (id, ptr, len) { return window.zbrtc ? window.zbrtc.send(id, HEAPU8.slice(ptr, ptr + len)) : 0; },
+  ZbRtcRecv: function (ptr, cap) { return window.zbrtc ? window.zbrtc.recv(ptr, cap, HEAPU8) : 0; },
+  ZbRtcLastPeer: function () { return window.zbrtc ? window.zbrtc.lastPeer : -1; },
+  ZbRtcLastArrival: function () { return window.zbrtc ? window.zbrtc.lastArrival : 0; },
+  ZbRtcClosePeer: function (id) { if (window.zbrtc) window.zbrtc.closePeer(id); },
+  ZbRtcStat: function (id, which) { return window.zbrtc ? window.zbrtc.stat(id, which) : 0; },
   ZbOrigin: function () {
     var o = location.origin;
     var n = lengthBytesUTF8(o) + 1;

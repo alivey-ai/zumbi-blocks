@@ -180,7 +180,7 @@ public static class ZbNet
         hostPassword = password ?? "";
         playerIp[0] = "127.0.0.1";
         string path = "/ws/host?v=" + PROTO + "&max=" + maxPlayers + "&name=" + Uri.EscapeDataString(roomName.Length > 0 ? roomName : "Zumbi room")
-            + "&pw=" + Uri.EscapeDataString(hostPassword) + "&type=" + Uri.EscapeDataString(hostType);
+            + "&pw=" + Uri.EscapeDataString(hostPassword) + "&type=" + Uri.EscapeDataString(hostType) + (ZbCfg.p2p ? "&rtc=1" : "");
         ZbWs.Open(path);
     }
 
@@ -188,7 +188,7 @@ public static class ZbNet
     {
         ZbCfg.Load(); EnsureRunner(); ResetSession();
         mode = Mode.ClientConnecting;
-        ZbWs.Open("/ws/room/" + Uri.EscapeDataString(code) + "?v=" + PROTO + "&pw=" + Uri.EscapeDataString(password ?? ""));
+        ZbWs.Open("/ws/room/" + Uri.EscapeDataString(code) + "?v=" + PROTO + "&pw=" + Uri.EscapeDataString(password ?? "") + (ZbCfg.p2p ? "&rtc=1" : ""));
     }
 
     public static void Register(string gameType, string name, string comment)
@@ -218,6 +218,7 @@ public static class ZbNet
     {
         mode = Mode.Offline; synced = false; remoteCount = 0; roomCode = ""; counter = 0; localId = 0;
         outLen = 0; playerIp.Clear(); playerPing.Clear(); pendingRpcs.Clear(); myPing = 0; ZbSync.Reset(); nextEcho = 0;
+        fastLen = 0; fastAny = fastAll = false; parked.Clear(); laneUp.Clear(); ctxViaDc = false;
     }
 
     // ---- ids ---------------------------------------------------------------------------------
@@ -467,6 +468,13 @@ public static class ZbNet
 
     static void Queue()
     {
+        // Phase 2: host state goes to the peers whose data channel is up. When every peer is on the channel the WebSocket copy is
+        // skipped altogether (that is what takes the traffic off the Durable Object); otherwise the relay skips the flagged peers.
+        if (fastAny && w.b[0] == C_STATE)
+        {
+            QueueFast();
+            if (fastAll) return;
+        }
         int need = 2 + w.n;
         if (outLen + need > OUT_SOFT && ZbWs.State() == 2) FlushOut();
         if (outLen == 0) StampFrame(); // every frame starts with this peer's clock reading
@@ -476,6 +484,88 @@ public static class ZbNet
         Buffer.BlockCopy(w.b, 0, outBuf, outLen, w.n); outLen += w.n;
         ZbSync.txMsgs++;
         byte op = outBuf[outLen - w.n]; long c; ZbSync.txByOp.TryGetValue(op, out c); ZbSync.txByOp[op] = c + 1;
+    }
+
+    // ---- data channel lane (host -> client state) ----------------------------------------------------
+    static byte[] fastBuf = new byte[16384];
+    static int fastLen;
+    static bool fastAny, fastAll;          // host: some / every connected peer has its data channel up (refreshed each Tick)
+    static bool ctxViaDc; static int dcPeer; // the frame being processed came over the data channel from this peer
+    static readonly Dictionary<int, bool> laneUp = new Dictionary<int, bool>();
+    const int DC_CHUNK = 1100;             // bytes per data channel message (a lost packet then loses one chunk, never a half message)
+
+    static void QueueFast()
+    {
+        int need = 2 + w.n;
+        if (fastLen + need > 262144) return; // peers that cannot keep up lose the oldest-never-sent: state is latest-wins
+        if (fastLen + need > fastBuf.Length) Array.Resize(ref fastBuf, Math.Max(fastBuf.Length * 2, fastLen + need));
+        fastBuf[fastLen++] = (byte)w.n; fastBuf[fastLen++] = (byte)(w.n >> 8);
+        Buffer.BlockCopy(w.b, 0, fastBuf, fastLen, w.n);
+        fastBuf[fastLen] = S_STATE; // the relay would forward it as S_STATE, same body
+        fastLen += w.n;
+        ZbSync.dcTxMsgs++;
+    }
+
+    static readonly byte[] dcOut = new byte[DC_CHUNK + 64];
+    static void FlushFast()
+    {
+        if (fastLen == 0) return;
+        if (fastAny)
+        {
+            uint ms = (uint)(long)ZbWs.Now();
+            int o = 0;
+            while (o < fastLen)
+            {
+                int start = o;
+                while (o + 2 <= fastLen)
+                {
+                    int len = fastBuf[o] | (fastBuf[o + 1] << 8);
+                    if (o - start + 2 + len > DC_CHUNK - 11 && o > start) break;
+                    o += 2 + len;
+                }
+                // every chunk starts with its own sender clock reading (S_TIME: i32 sender, u32 clock), like a relayed frame
+                int n = 0;
+                dcOut[n++] = 9; dcOut[n++] = 0; dcOut[n++] = S_TIME;
+                dcOut[n++] = (byte)localId; dcOut[n++] = (byte)(localId >> 8); dcOut[n++] = (byte)(localId >> 16); dcOut[n++] = (byte)(localId >> 24);
+                dcOut[n++] = (byte)ms; dcOut[n++] = (byte)(ms >> 8); dcOut[n++] = (byte)(ms >> 16); dcOut[n++] = (byte)(ms >> 24);
+                if (n + (o - start) > dcOut.Length) { o = start; break; }
+                Buffer.BlockCopy(fastBuf, start, dcOut, n, o - start); n += o - start;
+                foreach (var id in playerIp.Keys)
+                    if (id != 0 && ZbRtc.PeerUp(id) && ZbRtc.Send(id, dcOut, n)) { ZbSync.dcTxFrames++; ZbSync.dcTxBytes += n; }
+            }
+        }
+        fastLen = 0;
+    }
+
+    // Host: which peers are on the data channel right now. Both sides: notice lane flips and restart that peer's clock / RTT
+    // statistics (the two paths have different latency, one min-filter must not mix them).
+    static void UpdateLanes()
+    {
+        fastAny = fastAll = false;
+        if (!ZbCfg.p2p) return;
+        if (mode == Mode.Host)
+        {
+            int up = 0, total = 0;
+            foreach (var id in playerIp.Keys)
+            {
+                if (id == 0) continue;
+                total++;
+                bool u = ZbRtc.PeerUp(id);
+                if (u) up++;
+                NoteLane(id, u);
+            }
+            fastAny = up > 0; fastAll = total > 0 && up == total;
+        }
+        else if (mode == Mode.Client) NoteLane(0, ZbRtc.PeerUp(0));
+    }
+    static void NoteLane(int id, bool up)
+    {
+        bool was;
+        if (laneUp.TryGetValue(id, out was) ? was == up : !up) { laneUp[id] = up; return; }
+        laneUp[id] = up;
+        ZbSync.laneFlips++;
+        ZbSync.Clock(id).Reset();
+        ZbSync.rtt.Remove(id);
     }
 
     // C_TIME: u32 sender clock (ms, performance.now) of the moment this frame was started. The relay passes it on to the
@@ -489,6 +579,7 @@ public static class ZbNet
 
     static void FlushOut()
     {
+        FlushFast();
         if (outLen == 0 || ZbWs.State() != 2) return;
         // chunk on message boundaries so one frame stays well under the relay's 64 KB limit
         int o = 0;
@@ -536,6 +627,7 @@ public static class ZbNet
                 ZbSync.ctxArrival = ZbWs.LastArrival();
                 if (!ProcessFrame(n)) return; // yield to the game for a frame (e.g. after WELCOME) or session ended
             }
+            if (ZbCfg.p2p) DrainDc();
             if (Connected && Time.unscaledTime >= nextPing)
             {
                 nextPing = Time.unscaledTime + 2f;
@@ -551,6 +643,24 @@ public static class ZbNet
             }
         }
         RetryPending();
+        RetryParked();
+        UpdateLanes();
+    }
+
+    // Frames that arrived over the data channel: only S_TIME, S_STATE and S_ECHO are accepted, and the sender is the peer the channel
+    // belongs to (whatever the frame claims).
+    static void DrainDc()
+    {
+        for (int guard = 0; guard < 256; guard++)
+        {
+            int n = ZbRtc.Recv(rx);
+            if (n == 0) break;
+            if (n < 0) continue;
+            ZbSync.dcRxFrames++; ZbSync.dcRxBytes += n;
+            ZbSync.ctxArrival = ZbRtc.LastArrival();
+            ctxViaDc = true; dcPeer = ZbRtc.LastPeer();
+            try { ProcessFrame(n); } finally { ctxViaDc = false; }
+        }
     }
 
     public static void LateTick()
@@ -558,8 +668,17 @@ public static class ZbNet
         if (mode != Mode.Offline) FlushOut();
     }
 
+    static readonly byte[] echoOut = new byte[12];
     static void SendEcho(int type, int target, long t)
     {
+        if (ZbCfg.p2p && ZbRtc.PeerUp(target))
+        {
+            // straight over the data channel: S_ECHO (i32 sender = me, u8 type, u32 t), the receiver takes the channel's peer as sender
+            echoOut[0] = 10; echoOut[1] = 0; echoOut[2] = S_ECHO;
+            echoOut[3] = (byte)localId; echoOut[4] = (byte)(localId >> 8); echoOut[5] = (byte)(localId >> 16); echoOut[6] = (byte)(localId >> 24);
+            echoOut[7] = (byte)type; echoOut[8] = (byte)t; echoOut[9] = (byte)(t >> 8); echoOut[10] = (byte)(t >> 16); echoOut[11] = (byte)(t >> 24);
+            if (ZbRtc.Send(target, echoOut, 12)) { ZbSync.dcTxFrames++; ZbSync.dcTxBytes += 12; return; }
+        }
         w.Begin(C_ECHO).U8(type).I32(target).I32((int)(uint)t);
         Queue();
     }
@@ -573,8 +692,12 @@ public static class ZbNet
         {
             int len = rx[o] | (rx[o + 1] << 8); o += 2;
             if (len < 1 || o + len > n) break;
-            ZbSync.rxMsgs++;
-            { byte op = rx[o]; long c; ZbSync.rxByOp.TryGetValue(op, out c); ZbSync.rxByOp[op] = c + 1; }
+            if (ctxViaDc) ZbSync.dcRxMsgs++;
+            else
+            {
+                ZbSync.rxMsgs++;
+                byte op = rx[o]; long c; ZbSync.rxByOp.TryGetValue(op, out c); ZbSync.rxByOp[op] = c + 1;
+            }
             if (!ProcessMessage(o, len)) yield = true;
             o += len;
         }
@@ -586,6 +709,7 @@ public static class ZbNet
     {
         var r = new ZbR(rx, o, len);
         int op = r.U8();
+        if (ctxViaDc && op != S_TIME && op != S_STATE && op != S_ECHO) return true;
         switch (op)
         {
             case S_WELCOME:
@@ -627,6 +751,7 @@ public static class ZbNet
             {
                 int id = r.I32();
                 remoteCount = Math.Max(0, remoteCount - 1); playerPing.Remove(id);
+                ZbRtc.ClosePeer(id); laneUp.Remove(id);
                 Notify("OnPlayerDisconnected", new NetworkPlayer { id = id });
                 playerIp.Remove(id);
                 break;
@@ -652,13 +777,16 @@ public static class ZbNet
             case S_TIME:
             {
                 int sender = r.I32(); double stamp = (uint)r.I32();
+                if (ctxViaDc) sender = dcPeer;
                 ZbSync.ctxSender = sender; ZbSync.ctxStamp = stamp; ZbSync.ctxHasStamp = true;
-                if (ZbSync.ctxArrival > 0) ZbSync.Clock(sender).Sample(ZbSync.ctxArrival, stamp);
+                // one clock per sender samples only the lane that carries its state right now
+                if (ZbSync.ctxArrival > 0 && ctxViaDc == (ZbCfg.p2p && ZbRtc.PeerUp(sender))) ZbSync.Clock(sender).Sample(ZbSync.ctxArrival, stamp);
                 break;
             }
             case S_ECHO:
             {
                 int sender = r.I32(); int type = r.U8(); long t = (uint)r.I32();
+                if (ctxViaDc) sender = dcPeer;
                 if (type == 0) SendEcho(1, sender, t); // answer at once; the sender measures the round trip
                 else
                 {
@@ -671,12 +799,53 @@ public static class ZbNet
             case S_STATE:
             {
                 long view; string name; object[] args;
+                if (ctxViaDc)
+                {
+                    // only the host sends state over the channel, and a state message can overtake the WebSocket INST of a fresh object
+                    if (dcPeer == 0 && !Network.isServer && ReadState(r, out view, out name, out args)) DeliverFastState(view, name, args);
+                    break;
+                }
                 if (ReadState(r, out view, out name, out args) && !DeliverRpc(view, name, args))
                     pendingRpcs.Add(new PendingRpc { t = Time.unscaledTime, sender = ZbSync.ctxSender, view = view, name = name, args = args });
                 break;
             }
         }
         return true;
+    }
+
+    // State that arrived over the data channel for a view that does not exist yet (its INST is still on the WebSocket): keep the newest
+    // sample per view for a short while, drop it silently if the object never shows up (it may have been destroyed already).
+    struct Parked { public float t; public int sender; public double stamp, arrival; public bool hasStamp; public string name; public object[] args; }
+    static readonly Dictionary<long, Parked> parked = new Dictionary<long, Parked>();
+    static readonly List<long> parkedDone = new List<long>();
+    const float PARK_TTL = 2f;
+
+    static void DeliverFastState(long view, string name, object[] args)
+    {
+        NetworkView nv;
+        if (views.TryGetValue(view, out nv) && nv != null) { ZbSync.TryFeed(nv, name, args); nv.Dispatch(name, args); return; }
+        if (parked.Count >= 512 && !parked.ContainsKey(view)) return;
+        parked[view] = new Parked { t = Time.unscaledTime, sender = ZbSync.ctxSender, stamp = ZbSync.ctxStamp, arrival = ZbSync.ctxArrival, hasStamp = ZbSync.ctxHasStamp, name = name, args = args };
+    }
+
+    static void RetryParked()
+    {
+        if (parked.Count == 0) return;
+        parkedDone.Clear();
+        foreach (var kv in parked)
+        {
+            NetworkView nv;
+            if (views.TryGetValue(kv.Key, out nv) && nv != null)
+            {
+                int os = ZbSync.ctxSender; double ost = ZbSync.ctxStamp, oa = ZbSync.ctxArrival; bool oh = ZbSync.ctxHasStamp;
+                ZbSync.ctxSender = kv.Value.sender; ZbSync.ctxStamp = kv.Value.stamp; ZbSync.ctxArrival = kv.Value.arrival; ZbSync.ctxHasStamp = kv.Value.hasStamp;
+                try { ZbSync.TryFeed(nv, kv.Value.name, kv.Value.args); nv.Dispatch(kv.Value.name, kv.Value.args); }
+                finally { ZbSync.ctxSender = os; ZbSync.ctxStamp = ost; ZbSync.ctxArrival = oa; ZbSync.ctxHasStamp = oh; }
+                parkedDone.Add(kv.Key);
+            }
+            else if (Time.unscaledTime - kv.Value.t > PARK_TTL) parkedDone.Add(kv.Key);
+        }
+        foreach (var k in parkedDone) parked.Remove(k);
     }
 
     static bool DeliverRpc(long view, string name, object[] args)
@@ -751,6 +920,16 @@ public static class ZbNet
             try { m.Invoke(mb, args); }
             catch (Exception e) { Debug.LogException(e is TargetInvocationException && e.InnerException != null ? e.InnerException : e); }
         }
+    }
+
+    // peers this peer has (or would have) a data channel with: every client for the host, the host for a client
+    static readonly List<int> linkIds = new List<int>();
+    public static List<int> LinkIds()
+    {
+        linkIds.Clear();
+        if (mode == Mode.Host) { foreach (var id in playerIp.Keys) if (id != 0) linkIds.Add(id); }
+        else if (mode == Mode.Client) linkIds.Add(0);
+        return linkIds;
     }
 
     public static int Backlog { get { return outLen + ZbWs.Buffered(); } }
@@ -946,6 +1125,11 @@ public class NetRunner : MonoBehaviour
           .Append(",\"avgBuf\":").Append(ZbSync.framesSampled > 0 ? Math.Round(ZbSync.sumBuf / ZbSync.framesSampled, 2) : 0).Append("}");
         sb.Append(",\"backlog\":").Append(ZbNet.Backlog).Append(",\"fps\":").Append(Math.Round(1f / Mathf.Max(0.0001f, fpsDt), 1));
         sb.Append(",\"overlay\":").Append(showStats ? 1 : 0).Append(",\"netsimMs\":").Append(ZbWs.NetsimMs());
+        sb.Append(",\"p2p\":{\"on\":").Append(ZbCfg.p2p ? 1 : 0).Append(",\"mode\":\"").Append(ZbCfg.p2pMode).Append("\",\"rxFrames\":").Append(ZbSync.dcRxFrames).Append(",\"rxBytes\":").Append(ZbSync.dcRxBytes)
+          .Append(",\"rxMsgs\":").Append(ZbSync.dcRxMsgs).Append(",\"txFrames\":").Append(ZbSync.dcTxFrames).Append(",\"txBytes\":").Append(ZbSync.dcTxBytes).Append(",\"txMsgs\":").Append(ZbSync.dcTxMsgs)
+          .Append(",\"flips\":").Append(ZbSync.laneFlips).Append(",\"links\":{");
+        { bool f2 = true; foreach (var id in ZbNet.LinkIds()) { sb.Append(f2 ? "" : ",").Append("\"").Append(id).Append("\":{\"up\":").Append(ZbRtc.PeerUp(id) ? 1 : 0).Append(",\"state\":").Append(ZbRtc.Stat(id, 0)).Append(",\"rtt\":").Append(Math.Round(ZbRtc.Stat(id, 1), 1)).Append(",\"loss\":").Append(Math.Round(ZbRtc.Stat(id, 3), 1)).Append(",\"buffered\":").Append(ZbRtc.Stat(id, 8)).Append(",\"skipped\":").Append(ZbRtc.Stat(id, 9)).Append("}"); f2 = false; } }
+        sb.Append("}}");
         sb.Append(",\"cfg\":\"").Append(ZbCfg.interp ? "interp " : "nointerp ").Append(ZbCfg.compact ? "compact " : "rpc ").Append("rate=").Append(ZbCfg.rate).Append("\"");
         sb.Append("}");
         Debug.Log("ZBSTATS " + sb);
@@ -976,6 +1160,21 @@ public class NetRunner : MonoBehaviour
         if (showStats) DrawStats();
     }
 
+    // which link each peer uses: DC (WebRTC data channel, direct) or WS (Cloudflare relay), and its round trip
+    static void AppendLinks(StringBuilder sb)
+    {
+        if (!ZbCfg.p2p) { sb.Append("Link: WS (p2p off)\n"); return; }
+        foreach (var id in ZbNet.LinkIds())
+        {
+            bool up = ZbRtc.PeerUp(id);
+            int st = (int)ZbRtc.Stat(id, 0);
+            sb.Append("Link ").Append(Network.isServer ? "player " + id : "host").Append(": ").Append(up ? "DC" : "WS");
+            if (up) sb.Append("  rtt ").Append(Math.Round(ZbRtc.Stat(id, 2))).Append(" ms, probe loss ").Append(ZbRtc.Stat(id, 3).ToString("0")).Append("%, buf ").Append(ZbRtc.Stat(id, 8));
+            else sb.Append(st == 1 ? "  (connecting)" : st == 2 ? "  (channel open, checking)" : st == 4 ? "  (direct failed, relay only)" : "  (no direct link)");
+            sb.Append("\n");
+        }
+    }
+
     void DrawStats()
     {
         if (boxStyle == null)
@@ -999,8 +1198,10 @@ public class NetRunner : MonoBehaviour
             if (ZbSync.clocks.TryGetValue(0, out c)) sb.Append("   host->me jitter ").Append(Math.Round(c.jitter, 1)).Append(" ms, queue ").Append(Math.Round(c.lastQueue)).Append(" ms");
             sb.Append("\n");
         }
+        AppendLinks(sb);
         sb.Append("In : ").Append((ZbSync.rateRxBytes / 1024.0).ToString("0.0")).Append(" KB/s  ").Append(Math.Round(ZbSync.rateRxMsgs)).Append(" msg/s  ").Append(Math.Round(ZbSync.rateRxFrames)).Append(" frames/s\n");
         sb.Append("Out: ").Append((ZbSync.rateTxBytes / 1024.0).ToString("0.0")).Append(" KB/s  ").Append(Math.Round(ZbSync.rateTxMsgs)).Append(" msg/s  ").Append(Math.Round(ZbSync.rateTxFrames)).Append(" frames/s\n");
+        if (ZbCfg.p2p) sb.Append("DC : in ").Append((ZbSync.rateDcRxBytes / 1024.0).ToString("0.0")).Append(" KB/s ").Append(Math.Round(ZbSync.rateDcRxMsgs)).Append(" msg/s, out ").Append((ZbSync.rateDcTxBytes / 1024.0).ToString("0.0")).Append(" KB/s ").Append(Math.Round(ZbSync.rateDcTxMsgs)).Append(" msg/s, flips ").Append(ZbSync.laneFlips).Append("\n");
         sb.Append("Send backlog: ").Append(ZbNet.Backlog).Append(" B");
         double sim = ZbWs.NetsimMs(); if (sim > 0) sb.Append("    NETSIM +").Append(Math.Round(sim)).Append(" ms");
         sb.Append("\n");
@@ -1014,7 +1215,7 @@ public class NetRunner : MonoBehaviour
         }
         else sb.Append("Interp: off (original chase)\n");
         sb.Append("State: ").Append(ZbCfg.compact ? "compact" : "rpc").Append(", rate ").Append(ZbCfg.rate > 0 ? ZbCfg.rate.ToString("0") : "orig").Append("   ").Append(Math.Round(1f / Mathf.Max(0.0001f, fpsDt))).Append(" fps");
-        var r = new Rect(8, 8, 520, 130);
+        var r = new Rect(8, 8, 560, 130 + 16 * (ZbCfg.p2p ? 1 + (Network.isServer ? Mathf.Max(0, ZbNet.remoteCount - 1) : 0) : 0));
         var old = GUI.color;
         GUI.color = new Color(0f, 0f, 0f, 0.6f); GUI.DrawTexture(r, Texture2D.whiteTexture);
         GUI.color = old;

@@ -1,6 +1,6 @@
 import { chromium } from "playwright-core";
 export async function launch() {
-  return chromium.launch({ headless: true, channel: process.env.CH || undefined, args: process.env.CH ? ["--use-angle=metal", "--ignore-gpu-blocklist", "--enable-gpu-rasterization", "--autoplay-policy=no-user-gesture-required"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-webgl", "--autoplay-policy=no-user-gesture-required"] });
+  return chromium.launch({ headless: true, channel: process.env.CH || undefined, args: process.env.CH ? ["--use-angle=metal", "--ignore-gpu-blocklist", "--enable-gpu-rasterization", "--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-webgl", "--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns"] });
 }
 export async function game(b, name, base = "http://localhost:8787/") {
   const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } });
@@ -12,6 +12,8 @@ export async function game(b, name, base = "http://localhost:8787/") {
   const count = (st, inst, payload, base) => { const f = Buffer.from(payload); let o = 0; while (o + 2 <= f.length) { const len = f[o] | (f[o + 1] << 8); o += 2; const op = f[o]; st[op] = (st[op] || 0) + 1; if (op === base) { const g = f[o + (base === 0x83 ? 5 : 1)]; inst[g] = (inst[g] || 0) + 1; } o += len; } };
   p.on("websocket", (ws) => { ws.on("framesent", (f) => count(p.stats.sent, p.stats.instSent, f.payload, 2)); ws.on("framereceived", (f) => count(p.stats.recv, p.stats.instRecv, f.payload, 0x83));
   });
+  p.wsFrames = { sent: 0, sentText: 0, recv: 0 }; // frames this page sent to / got from the relay = messages the Durable Object receives / sends
+  p.on("websocket", (ws) => { ws.on("framesent", (f) => { p.wsFrames.sent++; if (typeof f.payload === "string") p.wsFrames.sentText++; }); ws.on("framereceived", () => { p.wsFrames.recv++; }); });
   p.on("websocket", (ws) => { console.log(`[${name}] ws open`, ws.url()); ws.on("framesent", (f) => { if (process.env.WSLOG) console.log(`[${name}] >>`, Buffer.from(f.payload).toString("hex").slice(0, 120)); }); ws.on("framereceived", (f) => { if (process.env.WSLOG) console.log(`[${name}] <<`, Buffer.from(f.payload).toString("hex").slice(0, 120)); }); ws.on("close", () => console.log(`[${name}] ws close`)); });
   await p.goto(base);
   await p.waitForFunction(() => document.querySelector("#loading").style.display === "none", null, { timeout: 120000 });
@@ -27,6 +29,7 @@ export async function game(b, name, base = "http://localhost:8787/") {
     for (const l of p.logs.slice(n)) { if (!l.startsWith("ZBT ")) continue; const [h, d] = l.split(" | "); const f = h.split(" "); const k = f[1]; if (!m.has(k)) m.set(k, { id: Number(k), mine: Number(f[2]), z: Number(f[3]), t0: Number(f[4]), p: [] }); for (const v of d.split(",")) m.get(k).p.push(Number(v)); }
     return [...m.values()];
   };
+  p.rtc = () => p.evaluate(() => (window.zbrtc ? window.zbrtc.info() : null)); // WebRTC lane state of this page (zbrtc.js)
   p.shot = async (f) => { await p.locator("#unity-canvas").screenshot({ path: f }); };
   return p;
 }
