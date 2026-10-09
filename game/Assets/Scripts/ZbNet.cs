@@ -23,6 +23,10 @@ static class ZbWs
     [DllImport("__Internal")] static extern int ZbWsBuffered();
     [DllImport("__Internal")] static extern void ZbWsClose();
     [DllImport("__Internal")] static extern IntPtr ZbOrigin();
+    [DllImport("__Internal")] static extern IntPtr ZbQuery();
+    [DllImport("__Internal")] static extern double ZbNow();
+    [DllImport("__Internal")] static extern double ZbWsLastArrival();
+    [DllImport("__Internal")] static extern double ZbNetsimMs();
     public static void Open(string path) { ZbWsOpen(path); }
     public static int State() { return ZbWsState(); }
     public static bool Send(byte[] d, int len) { return ZbWsSend(d, len) == 1; }
@@ -30,6 +34,10 @@ static class ZbWs
     public static int Buffered() { return ZbWsBuffered(); }
     public static void Close() { ZbWsClose(); }
     public static string Origin() { return Marshal.PtrToStringUTF8(ZbOrigin()); }
+    public static string Query() { return Marshal.PtrToStringUTF8(ZbQuery()); }
+    public static double Now() { return ZbNow(); }
+    public static double LastArrival() { return ZbWsLastArrival(); }
+    public static double NetsimMs() { return ZbNetsimMs(); }
 #else
     public static void Open(string path) { }
     public static int State() { return 3; }
@@ -38,6 +46,10 @@ static class ZbWs
     public static int Buffered() { return 0; }
     public static void Close() { }
     public static string Origin() { return "http://localhost:8787"; }
+    public static string Query() { return ""; }
+    public static double Now() { return UnityEngine.Time.realtimeSinceStartupAsDouble * 1000.0; }
+    public static double LastArrival() { return Now(); }
+    public static double NetsimMs() { return 0; }
 #endif
 }
 
@@ -99,10 +111,10 @@ public class NetIdentity : MonoBehaviour
 public static class ZbNet
 {
     // wire opcodes
-    const byte C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8;
+    const byte C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11;
     const byte S_WELCOME = 0x81, S_RPC = 0x82, S_INST = 0x83, S_DESTROY = 0x84, S_CONNECTED = 0x85, S_DISCONNECTED = 0x86,
-        S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a;
-    const int PROTO = 1;
+        S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d;
+    const int PROTO = 2;
     public const long SCENE_BASE = 1L << 51;
     const long OWNER_UNIT = 1L << 40;
 
@@ -163,7 +175,7 @@ public static class ZbNet
     // ---- connection lifecycle (called by Network / MasterServer shims) -----------------------
     public static void StartHost(int maxPlayers, string password)
     {
-        EnsureRunner(); ResetSession();
+        ZbCfg.Load(); EnsureRunner(); ResetSession();
         mode = Mode.HostConnecting; localId = 0; synced = true;
         hostPassword = password ?? "";
         playerIp[0] = "127.0.0.1";
@@ -174,7 +186,7 @@ public static class ZbNet
 
     public static void StartClient(string code, string password)
     {
-        EnsureRunner(); ResetSession();
+        ZbCfg.Load(); EnsureRunner(); ResetSession();
         mode = Mode.ClientConnecting;
         ZbWs.Open("/ws/room/" + Uri.EscapeDataString(code) + "?v=" + PROTO + "&pw=" + Uri.EscapeDataString(password ?? ""));
     }
@@ -205,7 +217,7 @@ public static class ZbNet
     static void ResetSession()
     {
         mode = Mode.Offline; synced = false; remoteCount = 0; roomCode = ""; counter = 0; localId = 0;
-        outLen = 0; playerIp.Clear(); playerPing.Clear(); pendingRpcs.Clear(); myPing = 0;
+        outLen = 0; playerIp.Clear(); playerPing.Clear(); pendingRpcs.Clear(); myPing = 0; ZbSync.Reset(); nextEcho = 0;
     }
 
     // ---- ids ---------------------------------------------------------------------------------
@@ -319,6 +331,7 @@ public static class ZbNet
             if (id == null) id = go.AddComponent<NetIdentity>();
             id.baseId = view; id.owner = owner; roots[view] = go;
             EnsureViews(go);
+            ZbSync.Tune(go);
         }
         return clone;
     }
@@ -353,10 +366,47 @@ public static class ZbNet
         if (m == RPCMode.Server && isServer) return;
         bool buffered = m == RPCMode.OthersBuffered || m == RPCMode.AllBuffered;
         if (!buffered && isServer && remoteCount == 0) return; // nobody to tell
+        if (m == RPCMode.Others && ZbCfg.compact && TrySendState(v, name, args)) return;
         w.Begin(C_RPC).U8((int)m).I64(v.id).Str8(name, 64);
         WriteArgs(args);
         if (w.n > 8000) { Debug.LogWarning("[zbnet] rpc too large, dropped: " + name); return; }
         Queue();
+    }
+
+    // Compact binary form of the three high-rate position RPCs (see docs/MULTIPLAYER.md, "State messages").
+    static bool TrySendState(NetworkView v, string name, object[] args)
+    {
+        if (args == null) return false;
+        if (name == "setzumbistuff")
+        {
+            if (args.Length != 2 || !(args[0] is int) || !(args[1] is Vector3)) return false;
+            int y = (int)args[0]; if (y < short.MinValue || y > short.MaxValue) return false;
+            w.Begin(C_STATE).U8(1).I64(v.id).U16(y & 0xFFFF).Vec3((Vector3)args[1]);
+        }
+        else if (name == "setposstuff")
+        {
+            if (args.Length != 6 || !(args[0] is int) || !(args[1] is int) || !(args[2] is Vector3) || !(args[3] is float) || !(args[4] is float) || !(args[5] is float)) return false;
+            int y = (int)args[0], h = (int)args[1];
+            if (y < short.MinValue || y > short.MaxValue || h < short.MinValue || h > short.MaxValue) return false;
+            w.Begin(C_STATE).U8(2).I64(v.id).U16(y & 0xFFFF).U16(h & 0xFFFF).Vec3((Vector3)args[2]).F32((float)args[3]).F32((float)args[4]).F32((float)args[5]);
+        }
+        else if (name == "updateposition")
+        {
+            if (args.Length != 1 || !(args[0] is Vector3)) return false;
+            w.Begin(C_STATE).U8(3).I64(v.id).Vec3((Vector3)args[0]);
+        }
+        else return false;
+        Queue();
+        return true;
+    }
+
+    static bool ReadState(ZbR r, out long view, out string name, out object[] args)
+    {
+        int kind = r.U8(); view = r.I64(); name = null; args = null;
+        if (kind == 1) { int y = (short)r.U16(); var p = r.Vec3(); name = "setzumbistuff"; args = new object[] { y, p }; }
+        else if (kind == 2) { int y = (short)r.U16(); int h = (short)r.U16(); var p = r.Vec3(); float a = r.F32(), b = r.F32(), c = r.F32(); name = "setposstuff"; args = new object[] { y, h, p, a, b, c }; }
+        else if (kind == 3) { var p = r.Vec3(); name = "updateposition"; args = new object[] { p }; }
+        return name != null && r.Ok;
     }
 
     static void WriteArgs(object[] args)
@@ -411,10 +461,22 @@ public static class ZbNet
     {
         int need = 2 + w.n;
         if (outLen + need > OUT_SOFT && ZbWs.State() == 2) FlushOut();
+        if (outLen == 0) StampFrame(); // every frame starts with this peer's clock reading
         if (outLen + need > OUT_CAP) { Debug.LogWarning("[zbnet] out queue full, dropping"); return; }
         if (outLen + need > outBuf.Length) Array.Resize(ref outBuf, Math.Max(outBuf.Length * 2, outLen + need));
         outBuf[outLen++] = (byte)w.n; outBuf[outLen++] = (byte)(w.n >> 8);
         Buffer.BlockCopy(w.b, 0, outBuf, outLen, w.n); outLen += w.n;
+        ZbSync.txMsgs++;
+        byte op = outBuf[outLen - w.n]; long c; ZbSync.txByOp.TryGetValue(op, out c); ZbSync.txByOp[op] = c + 1;
+    }
+
+    // C_TIME: u32 sender clock (ms, performance.now) of the moment this frame was started. The relay passes it on to the
+    // recipients (S_TIME) so they can interpolate on the sender's timeline instead of on jittery arrival times.
+    static void StampFrame()
+    {
+        outBuf[outLen++] = 5; outBuf[outLen++] = 0; outBuf[outLen++] = C_TIME;
+        uint ms = (uint)(long)ZbWs.Now();
+        outBuf[outLen++] = (byte)ms; outBuf[outLen++] = (byte)(ms >> 8); outBuf[outLen++] = (byte)(ms >> 16); outBuf[outLen++] = (byte)(ms >> 24);
     }
 
     static void FlushOut()
@@ -433,14 +495,14 @@ public static class ZbNet
             }
             var chunk = new byte[o - start];
             Buffer.BlockCopy(outBuf, start, chunk, 0, chunk.Length);
-            ZbWs.Send(chunk, chunk.Length);
+            if (ZbWs.Send(chunk, chunk.Length)) { ZbSync.txFrames++; ZbSync.txBytes += chunk.Length + 2; }
         }
         outLen = 0;
     }
 
     // ---- per frame ---------------------------------------------------------------------------
     static readonly byte[] rx = new byte[1 << 19];
-    static float nextPing;
+    static float nextPing, nextEcho;
     struct PendingRpc { public float t; public int sender; public long view; public string name; public object[] args; }
     static readonly List<PendingRpc> pendingRpcs = new List<PendingRpc>();
     static readonly Queue<Action> deferred = new Queue<Action>();
@@ -462,6 +524,8 @@ public static class ZbNet
                 int n = ZbWs.Recv(rx);
                 if (n == 0) break;
                 if (n < 0) { Debug.LogWarning("[zbnet] oversized frame dropped"); continue; }
+                ZbSync.rxFrames++; ZbSync.rxBytes += n + 2;
+                ZbSync.ctxArrival = ZbWs.LastArrival();
                 if (!ProcessFrame(n)) return; // yield to the game for a frame (e.g. after WELCOME) or session ended
             }
             if (Connected && Time.unscaledTime >= nextPing)
@@ -469,6 +533,13 @@ public static class ZbNet
                 nextPing = Time.unscaledTime + 2f;
                 w.Begin(C_PING).I32((int)(Time.realtimeSinceStartup * 1000f)).U16(Mathf.Clamp(myPing, 0, 65535));
                 Queue();
+            }
+            if (Connected && Time.unscaledTime >= nextEcho)
+            {
+                // round trip to the host through the relay (host side: to every client), measured by the game processes themselves
+                nextEcho = Time.unscaledTime + 1f;
+                if (Network.isServer) { var ids = new List<int>(playerIp.Keys); foreach (var id in ids) if (id != 0) SendEcho(0, id, (long)ZbWs.Now()); }
+                else SendEcho(0, 0, (long)ZbWs.Now());
             }
         }
         RetryPending();
@@ -479,17 +550,27 @@ public static class ZbNet
         if (mode != Mode.Offline) FlushOut();
     }
 
+    static void SendEcho(int type, int target, long t)
+    {
+        w.Begin(C_ECHO).U8(type).I32(target).I32((int)(uint)t);
+        Queue();
+    }
+
     // Returns false when the caller should stop reading for this frame (after WELCOME / session end).
     static bool ProcessFrame(int n)
     {
         int o = 0; bool yield = false;
+        ZbSync.ctxSender = -1; ZbSync.ctxHasStamp = false;
         while (o + 2 <= n)
         {
             int len = rx[o] | (rx[o + 1] << 8); o += 2;
             if (len < 1 || o + len > n) break;
+            ZbSync.rxMsgs++;
+            { byte op = rx[o]; long c; ZbSync.rxByOp.TryGetValue(op, out c); ZbSync.rxByOp[op] = c + 1; }
             if (!ProcessMessage(o, len)) yield = true;
             o += len;
         }
+        ZbSync.ctxSender = -1; ZbSync.ctxHasStamp = false;
         return !yield && mode != Mode.Offline;
     }
 
@@ -560,6 +641,32 @@ public static class ZbNet
             case S_SYNC_DONE:
                 synced = true;
                 break;
+            case S_TIME:
+            {
+                int sender = r.I32(); double stamp = (uint)r.I32();
+                ZbSync.ctxSender = sender; ZbSync.ctxStamp = stamp; ZbSync.ctxHasStamp = true;
+                if (ZbSync.ctxArrival > 0) ZbSync.Clock(sender).Sample(ZbSync.ctxArrival, stamp);
+                break;
+            }
+            case S_ECHO:
+            {
+                int sender = r.I32(); int type = r.U8(); long t = (uint)r.I32();
+                if (type == 0) SendEcho(1, sender, t); // answer at once; the sender measures the round trip
+                else
+                {
+                    double rt = (double)(uint)(long)(ZbSync.ctxArrival > 0 ? ZbSync.ctxArrival : ZbWs.Now()) - t;
+                    if (rt < 0) rt += 4294967296.0;
+                    if (rt < 60000) ZbSync.Rtt(sender).Add(rt);
+                }
+                break;
+            }
+            case S_STATE:
+            {
+                long view; string name; object[] args;
+                if (ReadState(r, out view, out name, out args) && !DeliverRpc(view, name, args))
+                    pendingRpcs.Add(new PendingRpc { t = Time.unscaledTime, sender = ZbSync.ctxSender, view = view, name = name, args = args });
+                break;
+            }
         }
         return true;
     }
@@ -567,7 +674,7 @@ public static class ZbNet
     static bool DeliverRpc(long view, string name, object[] args)
     {
         NetworkView nv;
-        if (views.TryGetValue(view, out nv) && nv != null) { nv.Dispatch(name, args); return true; }
+        if (views.TryGetValue(view, out nv) && nv != null) { ZbSync.TryFeed(nv, name, args); nv.Dispatch(name, args); return true; }
         // Instantiated objects that are gone are expected (late RPCs); scene objects may not have a view yet.
         if (view < SCENE_BASE && !roots.ContainsKey(RootOf(view))) return true;
         return false;
@@ -638,6 +745,8 @@ public static class ZbNet
         }
     }
 
+    public static int Backlog { get { return outLen + ZbWs.Buffered(); } }
+
     public static int GetPing(int player)
     {
         int p; return playerPing.TryGetValue(player, out p) ? p : 0;
@@ -683,13 +792,21 @@ public static class ZbNet
 [DefaultExecutionOrder(-10000)]
 public class NetRunner : MonoBehaviour
 {
-    void OnEnable() { UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnLoaded; }
+    void OnEnable() { UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnLoaded; ZbCfg.Load(); showStats = ZbCfg.statsOn; }
     void OnDisable() { UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnLoaded; }
     void OnLoaded(UnityEngine.SceneManagement.Scene s, UnityEngine.SceneManagement.LoadSceneMode m)
     {
         if (ZbNet.Active) ZbNet.ScanScene();
     }
-    void Update() { ZbNet.Tick(); }
+    bool showStats;
+    float fpsDt = 0.016f;
+    void Update()
+    {
+        ZbNet.Tick();
+        ZbSync.TickRates();
+        fpsDt += (Time.unscaledDeltaTime - fpsDt) * 0.05f;
+        if (Input.GetKeyDown(KeyCode.F3)) showStats = !showStats;
+    }
     void LateUpdate() { ZbNet.LateTick(); }
     void OnApplicationQuit() { ZbNet.Shutdown(); }
 
@@ -718,11 +835,93 @@ public class NetRunner : MonoBehaviour
         var mc = FindFirstObjectByType<sc_matchcontroller>();
         sb.Append(",\"wave\":").Append(mc != null ? mc.wave : -1).Append(",\"spawners\":").Append(mc != null ? mc.spawners : -1);
         sb.Append(",\"shots\":").Append(FindObjectsByType<sc_shot>(FindObjectsSortMode.None).Length);
+        float minLife = float.MaxValue, maxLife = 0f;
+        foreach (var z in zs) { var lf = z.GetComponent<sc_life>(); if (lf != null && z.state != -1) { minLife = Mathf.Min(minLife, lf.quantia); maxLife = Mathf.Max(maxLife, lf.quantia); } }
+        foreach (var p in players)
+        {
+            var pnv = p.GetComponent<NetworkView>();
+            if (pnv == null || !pnv.isMine) continue;
+            float nd = float.MaxValue;
+            foreach (var z in zs) if (z.state != -1) nd = Mathf.Min(nd, Vector3.Distance(z.transform.position, p.transform.position));
+            if (nd < float.MaxValue) sb.Append(",\"zdist\":").Append(Mathf.Round(nd * 10f) / 10f);
+        }
+        if (minLife < float.MaxValue) sb.Append(",\"zlifeMin\":").Append(Mathf.Round(minLife)).Append(",\"zlifeMax\":").Append(Mathf.Round(maxLife));
+        var md = FindFirstObjectByType<sc_matchdata>();
+        sb.Append(",\"killed\":").Append(md != null ? md.zombieskilled : -1);
+        foreach (var p in players) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) sb.Append(",\"hp\":").Append(Mathf.Round(lf.quantia)); }
         sb.Append("}");
         Debug.Log("ZBDUMP " + sb);
     }
 
-    GUIStyle style;
+    // Test hook: turn the local player towards the nearest living zombie and level the view (lets a headless test aim).
+    public void DebugAim(string unused)
+    {
+        sc_player me = null;
+        foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); if (nv != null && nv.isMine) me = p; }
+        if (me == null) return;
+        sc_zumbi best = null; float bd = float.MaxValue;
+        foreach (var z in FindObjectsByType<sc_zumbi>(FindObjectsSortMode.None))
+        {
+            if (z.state == -1) continue;
+            float d = (z.transform.position - me.transform.position).sqrMagnitude;
+            if (d < bd) { bd = d; best = z; }
+        }
+        if (best == null) return;
+        var dir = best.transform.position - me.transform.position;
+        me.transform.rotation = Quaternion.Euler(0f, Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg, 0f);
+        me.headang = 0f;
+    }
+
+    // unityInstance.SendMessage("ZbNetRunner", "StatsDump", "") prints one "ZBSTATS {json}" line: cumulative traffic counters
+    // (tests subtract two dumps to get rates), round trips, jitter, interpolation counters.
+    public void StatsDump(string unused)
+    {
+        var sb = new StringBuilder("{");
+        sb.Append("\"t\":").Append((long)ZbWs.Now()).Append(",\"rx\":{\"msgs\":").Append(ZbSync.rxMsgs).Append(",\"bytes\":").Append(ZbSync.rxBytes).Append(",\"frames\":").Append(ZbSync.rxFrames)
+          .Append("},\"tx\":{\"msgs\":").Append(ZbSync.txMsgs).Append(",\"bytes\":").Append(ZbSync.txBytes).Append(",\"frames\":").Append(ZbSync.txFrames).Append("}");
+        sb.Append(",\"rtt\":{");
+        bool first = true;
+        foreach (var kv in ZbSync.rtt)
+        {
+            sb.Append(first ? "" : ",").Append("\"").Append(kv.Key).Append("\":{\"last\":").Append(Math.Round(kv.Value.last)).Append(",\"avg\":").Append(Math.Round(kv.Value.avg, 1))
+              .Append(",\"min\":").Append(Math.Round(kv.Value.min)).Append(",\"jitter\":").Append(Math.Round(kv.Value.jitter, 1)).Append(",\"n\":").Append(kv.Value.n).Append("}");
+            first = false;
+        }
+        sb.Append("},\"clockJitter\":{");
+        first = true;
+        foreach (var kv in ZbSync.clocks)
+        {
+            sb.Append(first ? "" : ",").Append("\"").Append(kv.Key).Append("\":").Append(Math.Round(kv.Value.jitter, 1));
+            first = false;
+        }
+        sb.Append("},\"relayPing\":").Append(ZbNet.myPing);
+        sb.Append(",\"interp\":{\"on\":").Append(ZbCfg.interp ? 1 : 0).Append(",\"entities\":").Append(ZbSync.interps.Count).Append(",\"snaps\":").Append(ZbSync.snaps)
+          .Append(",\"frames\":").Append(ZbSync.framesSampled).Append(",\"extrap\":").Append(ZbSync.framesExtrap).Append(",\"starved\":").Append(ZbSync.framesStarved)
+          .Append(",\"teleports\":").Append(ZbSync.teleports)
+          .Append(",\"avgDelay\":").Append(ZbSync.framesSampled > 0 ? Math.Round(ZbSync.sumDelay / ZbSync.framesSampled, 1) : 0)
+          .Append(",\"avgBuf\":").Append(ZbSync.framesSampled > 0 ? Math.Round(ZbSync.sumBuf / ZbSync.framesSampled, 2) : 0).Append("}");
+        sb.Append(",\"backlog\":").Append(ZbNet.Backlog).Append(",\"fps\":").Append(Math.Round(1f / Mathf.Max(0.0001f, fpsDt), 1));
+        sb.Append(",\"overlay\":").Append(showStats ? 1 : 0).Append(",\"netsimMs\":").Append(ZbWs.NetsimMs());
+        sb.Append(",\"cfg\":\"").Append(ZbCfg.interp ? "interp " : "nointerp ").Append(ZbCfg.compact ? "compact " : "rpc ").Append("rate=").Append(ZbCfg.rate).Append("\"");
+        sb.Append("}");
+        Debug.Log("ZBSTATS " + sb);
+    }
+
+    // Visual smoothness probe: SampleStart records every frame, SampleStop prints "ZBSAMPLE {json}".
+    ZbSampler sampler;
+    public void SampleStart(string unused)
+    {
+        if (sampler != null) Destroy(sampler);
+        sampler = gameObject.AddComponent<ZbSampler>();
+    }
+    public void SampleStop(string unused)
+    {
+        if (sampler == null) { Debug.Log("ZBSAMPLE {}"); return; }
+        sampler.Dump(); // prints one ZBTRACK line per entity, then "ZBSAMPLE {}"
+        Destroy(sampler); sampler = null;
+    }
+
+    GUIStyle style, boxStyle;
     void OnGUI()
     {
         if (!ZbNet.Connected || ZbNet.roomCode.Length == 0) return;
@@ -730,5 +929,51 @@ public class NetRunner : MonoBehaviour
         GUI.depth = -1000;
         string txt = "Room code: " + ZbNet.roomCode + (Network.isServer ? "  (you host, " + (ZbNet.remoteCount + 1) + " players)" : "  (" + ZbNet.myPing + " ms)");
         GUI.Label(new Rect(Screen.width - 420, 4, 410, 22), txt, style);
+        if (showStats) DrawStats();
+    }
+
+    void DrawStats()
+    {
+        if (boxStyle == null)
+        {
+            boxStyle = new GUIStyle(GUI.skin.label) { fontSize = 12, alignment = TextAnchor.UpperLeft, richText = false };
+            boxStyle.normal.textColor = new Color(0.75f, 1f, 0.75f, 1f);
+        }
+        var sb = new StringBuilder();
+        sb.Append("NET STATS  (F3 hides)\n");
+        if (Network.isServer)
+        {
+            foreach (var kv in ZbSync.rtt) sb.Append("RTT player ").Append(kv.Key).Append(": ").Append(Math.Round(kv.Value.last)).Append(" ms  (avg ").Append(Math.Round(kv.Value.avg)).Append(", min ").Append(Math.Round(kv.Value.min)).Append(", jitter ").Append(Math.Round(kv.Value.jitter, 1)).Append(")\n");
+            if (ZbSync.rtt.Count == 0) sb.Append("RTT: no clients\n");
+        }
+        else
+        {
+            ZbRtt h; ZbClock c;
+            if (ZbSync.rtt.TryGetValue(0, out h)) sb.Append("RTT host: ").Append(Math.Round(h.last)).Append(" ms  (avg ").Append(Math.Round(h.avg)).Append(", min ").Append(Math.Round(h.min)).Append(", jitter ").Append(Math.Round(h.jitter, 1)).Append(")\n");
+            else sb.Append("RTT host: ...\n");
+            sb.Append("Relay RTT: ").Append(ZbNet.myPing).Append(" ms");
+            if (ZbSync.clocks.TryGetValue(0, out c)) sb.Append("   host->me jitter ").Append(Math.Round(c.jitter, 1)).Append(" ms, queue ").Append(Math.Round(c.lastQueue)).Append(" ms");
+            sb.Append("\n");
+        }
+        sb.Append("In : ").Append((ZbSync.rateRxBytes / 1024.0).ToString("0.0")).Append(" KB/s  ").Append(Math.Round(ZbSync.rateRxMsgs)).Append(" msg/s  ").Append(Math.Round(ZbSync.rateRxFrames)).Append(" frames/s\n");
+        sb.Append("Out: ").Append((ZbSync.rateTxBytes / 1024.0).ToString("0.0")).Append(" KB/s  ").Append(Math.Round(ZbSync.rateTxMsgs)).Append(" msg/s  ").Append(Math.Round(ZbSync.rateTxFrames)).Append(" frames/s\n");
+        sb.Append("Send backlog: ").Append(ZbNet.Backlog).Append(" B");
+        double sim = ZbWs.NetsimMs(); if (sim > 0) sb.Append("    NETSIM +").Append(Math.Round(sim)).Append(" ms");
+        sb.Append("\n");
+        if (ZbCfg.interp)
+        {
+            double d = 0, b = 0; foreach (var it in ZbSync.interps) { d += it.delay; b += it.Buffered; }
+            int n = ZbSync.interps.Count;
+            sb.Append("Interp: ").Append(n).Append(" entities, ").Append(Math.Round(ZbSync.rateSnaps)).Append(" snapshots/s, delay ").Append(n > 0 ? Math.Round(d / n) : 0).Append(" ms, buffer ").Append(n > 0 ? (b / n).ToString("0.0") : "0");
+            if (ZbSync.framesSampled > 0) sb.Append(", extrap ").Append((100.0 * ZbSync.framesExtrap / ZbSync.framesSampled).ToString("0.0")).Append("%, starved ").Append((100.0 * ZbSync.framesStarved / ZbSync.framesSampled).ToString("0.0")).Append("%");
+            sb.Append("\n");
+        }
+        else sb.Append("Interp: off (original chase)\n");
+        sb.Append("State: ").Append(ZbCfg.compact ? "compact" : "rpc").Append(", rate ").Append(ZbCfg.rate > 0 ? ZbCfg.rate.ToString("0") : "orig").Append("   ").Append(Math.Round(1f / Mathf.Max(0.0001f, fpsDt))).Append(" fps");
+        var r = new Rect(8, 8, 520, 130);
+        var old = GUI.color;
+        GUI.color = new Color(0f, 0f, 0f, 0.6f); GUI.DrawTexture(r, Texture2D.whiteTexture);
+        GUI.color = old;
+        GUI.Label(new Rect(r.x + 6, r.y + 4, r.width - 12, r.height - 8), sb.ToString(), boxStyle);
     }
 }
