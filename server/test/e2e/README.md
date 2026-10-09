@@ -16,3 +16,5 @@ With the WebRTC lane (phase 2) the headless Chrome gets `--disable-features=WebR
 `phase3.mjs` (needs `ws`, which is in the server devDependencies) covers phase 3: nickname prompt on a fresh profile, Quick Play (creates a room, then a second browser joins it), the auto start countdown, the server list fields, invite links (join, unknown room, other build, closed room), and settings persistence (menu and in-game). Pages created with `game(b, name, base, { fresh: true })` keep the first-run nickname prompt; all others skip it (`DebugSkipNick`) so the older tests are unchanged.
 
 `supply.mjs` checks the radio airdrop (single player: one crate, one bag; host + client: both see one crate then exactly one bag, the client can open it). `effects.mjs` spawns every particle effect prefab in the real build (`DebugFx` hook) and writes `docs/img/effects-ingame-*.png`; the editor renderer `Assets/Editor/EffectsShots.cs` writes `docs/img/effects-*.png` (see docs/RECOVERY.md).
+
+If `e2e.mjs` late-joiner checks fail locally but pass live, clear stale local Durable Object state: `rm -rf server/.wrangler/state` and restart `wrangler dev`.
