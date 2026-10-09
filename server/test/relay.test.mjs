@@ -22,10 +22,11 @@ const listing = (listed, name) => { const n = enc.encode(name); return new Uint8
 
 class Client {
   constructor(path) {
-    this.msgs = []; this.frames = []; this.waiters = []; this.closed = false;
+    this.msgs = []; this.frames = []; this.texts = []; this.waiters = []; this.closed = false;
     this.ws = new WebSocket(`ws://${BASE}${path}`);
     this.ws.binaryType = "arraybuffer";
-    this.ws.on("message", (d) => {
+    this.ws.on("message", (d, isBinary) => {
+      if (isBinary === false) { try { this.texts.push(JSON.parse(Buffer.from(d).toString())); } catch { this.texts.push({ bad: true }); } this.pump(); return; }
       const f = new Uint8Array(d);
       let o = 0; const fr = [];
       while (o + 2 <= f.length) { const len = f[o] | (f[o + 1] << 8); o += 2; const m = f.slice(o, o + len); this.msgs.push(m); fr.push(m); o += len; }
@@ -47,6 +48,16 @@ class Client {
     }
   }
   async none(op, ms = 400) { await sleep(ms); assert.equal(this.msgs.filter((m) => m[0] === op).length, 0, "unexpected op 0x" + op.toString(16)); }
+  sendText(o) { this.ws.send(typeof o === "string" ? o : JSON.stringify(o)); }
+  async takeText(t, ms = 3000) {
+    const t0 = Date.now();
+    for (;;) {
+      const i = this.texts.findIndex((m) => m.t === t);
+      if (i >= 0) return this.texts.splice(i, 1)[0];
+      if (Date.now() - t0 > ms) throw new Error("timeout waiting for text " + t + " have " + JSON.stringify(this.texts));
+      await new Promise((r) => { const w = () => { this.waiters = this.waiters.filter((x) => x !== w); r(); }; this.waiters.push(w); setTimeout(w, 50); });
+    }
+  }
   count(op) { return this.msgs.filter((m) => m[0] === op).length; }
   close() { this.ws.close(); }
 }
@@ -54,7 +65,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dv = (m) => new DataView(m.buffer, m.byteOffset, m.byteLength);
 
 async function host(extra = "") {
-  const h = new Client(`/ws/host?v=2&max=3&name=Test+Room${extra}`); await h.opened;
+  const h = new Client(`/ws/host?v=2&name=Test+Room${extra.includes("max=") ? "" : "&max=3"}${extra}`); await h.opened;
   const w = await h.take(0x81);
   const code = new TextDecoder().decode(w.subarray(5 + 3, 5 + 3 + w[7]));
   return { h, code, id: dv(w).getInt32(1, true), isHost: w[5] };
@@ -251,6 +262,61 @@ await test("echo: client <-> host only, sender id stamped, payload preserved", a
   h.send(echo(0, 9, 1), echo(0, 0, 1)); // unknown target / to self
   await sleep(200); assert.equal(h.count(0x8c) + a.count(0x8c) + b.count(0x8c), 0);
   [h, a, b].forEach((x) => x.close());
+});
+
+// ---- Phase 2: WebRTC signaling + data channel flag (text frames) --------------------------------------------
+await test("rtc: hello only with rtc=1, legacy clients never get text frames", async () => {
+  const { h, code } = await host("&rtc=1&max=5");
+  const hh = await h.takeText("hello"); assert.deepEqual(hh, { t: "hello", id: 0, host: true });
+  const a = await join(code, "&rtc=1"); const ha = await a.takeText("hello"); assert.deepEqual(ha, { t: "hello", id: 1, host: false });
+  const old = await join(code); await old.take(0x8a); await sleep(200); assert.equal(old.texts.length, 0);
+  [h, a, old].forEach((x) => x.close());
+});
+
+await test("rtc: sig routing, star only, from stamped, malformed / oversize / rate limited dropped", async () => {
+  const { h, code } = await host("&rtc=1&max=5"); await h.takeText("hello");
+  const a = await join(code, "&rtc=1"); await a.takeText("hello");
+  const b = await join(code, "&rtc=1"); await b.takeText("hello");
+  const legacy = await join(code); await legacy.take(0x8a);
+  a.sendText({ t: "sig", to: 0, gen: 3, k: "offer", sdp: "v=0", from: 99 });
+  const s = await h.takeText("sig"); assert.equal(s.from, 1); assert.equal(s.gen, 3); assert.equal(s.k, "offer"); assert.equal(s.sdp, "v=0");
+  h.sendText({ t: "sig", to: 1, gen: 3, k: "answer", sdp: "v=1" });
+  const ans = await a.takeText("sig"); assert.equal(ans.from, 0); assert.equal(ans.k, "answer");
+  a.sendText({ t: "sig", to: 2, gen: 1, k: "offer", sdp: "x" }); // client to client
+  a.sendText({ t: "sig", to: 0, gen: 1, k: "nope" });             // bad kind
+  a.sendText("{not json"); a.sendText({ t: "sig", to: "0", k: "ice" });
+  a.sendText({ t: "sig", to: 0, gen: 1, k: "ice", sdp: "y".repeat(9000) }); // oversize
+  h.sendText({ t: "sig", to: 3, gen: 1, k: "offer" });            // host to a legacy client (no rtc)
+  h.sendText({ t: "sig", to: 77, gen: 1, k: "offer" });           // unknown target
+  await sleep(300);
+  assert.equal(b.texts.length, 0); assert.equal(h.texts.length, 0); assert.equal(legacy.texts.length, 0);
+  for (let i = 0; i < 80; i++) a.sendText({ t: "sig", to: 0, gen: 1, k: "ice", c: { candidate: "c" + i } });
+  await sleep(500);
+  const got = h.texts.filter((m) => m.t === "sig").length; assert.ok(got <= 60 && got >= 50, "rate limited to ~60/10s, got " + got);
+  [h, a, b, legacy].forEach((x) => x.close());
+});
+
+await test("rtc: dc flag moves host state off the websocket of that client only; rpc unaffected; flag cleared by client / host / close", async () => {
+  const { h, code } = await host("&rtc=1&max=5"); await h.takeText("hello");
+  const a = await join(code, "&rtc=1"); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code, "&rtc=1"); await b.take(0x8a); await h.take(0x85);
+  const V = SCENE(31);
+  h.send(state(1, V, 14)); await a.take(0x8d); await b.take(0x8d);        // no flags yet: both get it
+  a.sendText({ t: "dc", up: true }); await sleep(200);
+  h.send(state(1, V, 14)); await b.take(0x8d); await a.none(0x8d, 250);   // a is on the data channel now
+  h.send(rpc(1, V, "hit")); await a.take(0x82); await b.take(0x82);       // RPCs still go through the relay
+  b.send(state(1, V, 14)); await h.take(0x8d); await a.take(0x8d);         // client state is unaffected
+  h.sendText({ t: "dc", to: 1, up: true }); await sleep(100);            // the host cannot set flags...
+  b.sendText({ t: "dc", up: true }); await sleep(100); h.send(state(1, V, 14)); await a.none(0x8d, 200); await b.none(0x8d, 10);
+  b.sendText({ t: "dc", up: false }); await sleep(100); h.send(state(1, V, 14)); await b.take(0x8d); await a.none(0x8d, 150);
+  h.sendText({ t: "dc", to: 1, up: false }); await sleep(100);           // ...but may clear them
+  h.send(state(1, V, 14)); await a.take(0x8d); await b.take(0x8d);
+  a.sendText({ t: "dc", up: true }); await sleep(100); a.close(); await sleep(200);
+  const a2 = await join(code, "&rtc=1"); await a2.take(0x8a); await h.take(0x85); // new id, flag of the old one is gone
+  h.send(state(1, V, 14)); await a2.take(0x8d);
+  const legacy = await join(code); await legacy.take(0x8a); legacy.sendText({ t: "dc", up: true }); await sleep(100); // no rtc: ignored
+  h.send(state(1, V, 14)); await legacy.take(0x8d);
+  [h, b, a2, legacy].forEach((x) => x.close());
 });
 
 console.log(`${ok} tests passed`);

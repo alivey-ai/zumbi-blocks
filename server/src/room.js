@@ -24,6 +24,11 @@ const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 const SNAPSHOT_MAX = 1_500_000;
 const ALARM_MS = 25_000;
 const MAX_PLAYER_ID = 250;
+// Phase 2 (docs/design/PHASE2-WEBRTC.md): JSON text frames on the same socket carry WebRTC signaling and the
+// "data channel is up" flag. Binary frames are untouched.
+const MAX_TEXT = 8192;
+const SIG_KINDS = new Set(["offer", "answer", "ice", "bye"]);
+const SIG_PER_10S = 60;
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -53,6 +58,8 @@ export class Room extends DurableObject {
     this.bytes = 0;
     this.seq = 0;
     this.players = new Map(); // id -> ws
+    this.dcUp = new Set(); // ids of clients whose host->client state travels over their WebRTC data channel
+    this.sigRate = new WeakMap();
     this.rate = new WeakMap();
     this.dirty = false;
     ctx.blockConcurrencyWhile(async () => {
@@ -61,7 +68,7 @@ export class Room extends DurableObject {
       if (this.meta && snap) this.loadSnapshot(snap);
       for (const ws of ctx.getWebSockets()) {
         const a = ws.deserializeAttachment();
-        if (a) this.players.set(a.id, ws);
+        if (a) { this.players.set(a.id, ws); if (a.dc && !a.host) this.dcUp.add(a.id); }
       }
     });
   }
@@ -82,6 +89,7 @@ export class Room extends DurableObject {
 
     if (Number(q.get("v") || 0) !== PROTO) return reject(R_PROTO);
     const ipid = await ipId(code, q.get("ipid") || "");
+    const rtc = q.get("rtc") === "1";
 
     if (isHost) {
       const max = Math.max(2, Math.min(16, parseInt(q.get("max") || "16", 10) || 16));
@@ -93,11 +101,12 @@ export class Room extends DurableObject {
         comment: "", listed: false,
       };
       this.buf = []; this.byRoot.clear(); this.alive.clear(); this.bytes = 0; this.seq = 0;
-      server.serializeAttachment({ id: 0, host: true, ipid });
+      server.serializeAttachment({ id: 0, host: true, ipid, rtc });
       this.players.set(0, server);
       await this.ctx.storage.put("meta", this.meta);
       await this.ctx.storage.setAlarm(Date.now() + ALARM_MS);
       this.sendNow(server, [this.welcome(0, true)]);
+      if (rtc) this.sendText(server, { t: "hello", id: 0, host: true });
       return reply();
     }
 
@@ -107,9 +116,10 @@ export class Room extends DurableObject {
 
     const id = this.meta.nextId++;
     await this.ctx.storage.put("meta", this.meta);
-    server.serializeAttachment({ id, host: false, ipid });
+    server.serializeAttachment({ id, host: false, ipid, rtc });
     this.players.set(id, server);
     this.sendNow(server, [this.welcome(id, false)]);
+    if (rtc) this.sendText(server, { t: "hello", id, host: false });
     // tell the host first (OnPlayerConnected), then replay buffered state to the newcomer
     const host = this.players.get(0);
     if (host) { const ip = str8(ipid, 16); this.sendNow(host, [this.msg(S_CONNECTED, [...i32b(id), ip.length, ...ip])]); }
@@ -133,6 +143,8 @@ export class Room extends DurableObject {
     try { ws.send(f); } catch {}
   }
 
+  sendText(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch {} }
+
   replayTo(ws) {
     let chunk = [], size = 0;
     const flush = () => { if (chunk.length) { this.sendNow(ws, chunk); chunk = []; size = 0; } };
@@ -146,9 +158,10 @@ export class Room extends DurableObject {
 
   // ---- messages ---------------------------------------------------------------------------
   async webSocketMessage(ws, data) {
-    if (typeof data === "string" || !this.meta) return;
+    if (!this.meta) return;
     const att = ws.deserializeAttachment();
     if (!att) return;
+    if (typeof data === "string") { this.handleText(ws, att, data); return; }
     const frame = new Uint8Array(data);
     if (frame.length > MAX_FRAME) { this.kick(ws, R_RATE, 1009); return; }
     if (!this.takeTokens(ws, att, frame.length)) return;
@@ -172,6 +185,50 @@ export class Room extends DurableObject {
       }
       this.sendNow(target, bodies);
     }
+  }
+
+  // WebRTC signaling and data channel flag (JSON text frames). Everything malformed is dropped silently.
+  handleText(ws, att, text) {
+    if (!att.rtc || text.length > MAX_TEXT) return;
+    if (!this.takeTokens(ws, att, text.length)) return;
+    let m;
+    try { m = JSON.parse(text); } catch { return; }
+    if (!m || typeof m !== "object") return;
+    if (m.t === "sig") {
+      const now = Date.now();
+      let r = this.sigRate.get(ws);
+      if (!r || now - r.t0 > 10000) { r = { t0: now, n: 0 }; this.sigRate.set(ws, r); }
+      if (++r.n > SIG_PER_10S) return;
+      const to = m.to;
+      if (!Number.isInteger(to) || to === att.id || !SIG_KINDS.has(m.k)) return;
+      if (!att.host && to !== 0) return; // star only: clients may signal the host and nobody else
+      const w = this.players.get(to);
+      if (!w) return;
+      const ta = w.deserializeAttachment();
+      if (!ta || !ta.rtc) return;
+      const out = { t: "sig", from: att.id, gen: Number.isInteger(m.gen) ? m.gen : 0, k: m.k };
+      if (typeof m.sdp === "string") out.sdp = m.sdp;
+      if (m.c && typeof m.c === "object") out.c = m.c;
+      this.sendText(w, out);
+    } else if (m.t === "dc") {
+      if (att.host) {
+        // the host may only clear a client's flag (it noticed the channel died), never set it
+        if (m.up === false && Number.isInteger(m.to)) this.setDc(m.to, false);
+      } else this.setDc(att.id, m.up === true);
+    } else if (m.t === "stat") {
+      // connection telemetry from a client (result, candidate type, ms)
+      console.log("p2p-stat", JSON.stringify({ id: att.id, r: String(m.r || "").slice(0, 16), c: String(m.c || "").slice(0, 16), ms: Number(m.ms) | 0 }));
+    }
+  }
+
+  setDc(id, up) {
+    if (id === 0) return;
+    const w = this.players.get(id);
+    if (!w) { this.dcUp.delete(id); return; }
+    const a = w.deserializeAttachment();
+    if (!a || !a.rtc) return;
+    if (up) this.dcUp.add(id); else this.dcUp.delete(id);
+    if (!!a.dc !== up) { a.dc = up; w.serializeAttachment(a); }
   }
 
   takeTokens(ws, att, n) {
@@ -272,7 +329,7 @@ export class Room extends DurableObject {
         // compact position updates (what used to be RPCs setzumbistuff / setposstuff / updateposition, mode Others, unbuffered)
         if (b.length < 2 || STATE_LEN[b[1]] !== b.length) return;
         const out = new Uint8Array(b.length); out.set(b); out[0] = S_STATE;
-        for (const [id, w] of this.players) if (id !== me) emit(w, out);
+        for (const [id, w] of this.players) if (id !== me && !(me === 0 && this.dcUp.has(id))) emit(w, out);
         return;
       }
       case C_ECHO: {
@@ -376,6 +433,7 @@ export class Room extends DurableObject {
     if (att.host) { this.closeRoom(R_HOST_LEFT); return; }
     if (this.players.get(att.id) !== ws) return;
     this.players.delete(att.id);
+    this.dcUp.delete(att.id);
     const h = this.players.get(0);
     if (h) this.sendNow(h, [this.msg(S_DISCONNECTED, i32b(att.id))]);
     this.lobbyUpdate();
@@ -392,7 +450,7 @@ export class Room extends DurableObject {
     if (!this.meta) return;
     const code = this.meta.code, listed = this.meta.listed;
     const sockets = [...this.players.values()];
-    this.meta = null; this.buf = []; this.byRoot.clear(); this.alive.clear(); this.players.clear(); this.bytes = 0;
+    this.meta = null; this.buf = []; this.byRoot.clear(); this.alive.clear(); this.players.clear(); this.dcUp.clear(); this.bytes = 0;
     for (const w of sockets) { this.sendNow(w, [this.msg(S_REJECT, [reason])]); try { w.close(1000, "room closed"); } catch {} }
     try { await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll(); } catch {}
     if (listed) this.lobby().remove(code).catch(() => {});
