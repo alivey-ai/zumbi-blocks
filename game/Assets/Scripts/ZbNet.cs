@@ -27,6 +27,10 @@ static class ZbWs
     [DllImport("__Internal")] static extern double ZbNow();
     [DllImport("__Internal")] static extern double ZbWsLastArrival();
     [DllImport("__Internal")] static extern double ZbNetsimMs();
+    [DllImport("__Internal")] static extern void ZbSetRoomUi(string code, int hosting);
+    [DllImport("__Internal")] static extern void ZbClearInvite();
+    public static void SetRoomUi(string code, bool hosting) { ZbSetRoomUi(code ?? "", hosting ? 1 : 0); }
+    public static void ClearInviteParam() { ZbClearInvite(); }
     public static void Open(string path) { ZbWsOpen(path); }
     public static int State() { return ZbWsState(); }
     public static bool Send(byte[] d, int len) { return ZbWsSend(d, len) == 1; }
@@ -39,6 +43,8 @@ static class ZbWs
     public static double LastArrival() { return ZbWsLastArrival(); }
     public static double NetsimMs() { return ZbNetsimMs(); }
 #else
+    public static void SetRoomUi(string code, bool hosting) { }
+    public static void ClearInviteParam() { }
     public static void Open(string path) { }
     public static int State() { return 3; }
     public static bool Send(byte[] d, int len) { return false; }
@@ -111,9 +117,9 @@ public class NetIdentity : MonoBehaviour
 public static class ZbNet
 {
     // wire opcodes
-    const byte C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11;
+    const byte C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11, C_META = 16;
     const byte S_WELCOME = 0x81, S_RPC = 0x82, S_INST = 0x83, S_DESTROY = 0x84, S_CONNECTED = 0x85, S_DISCONNECTED = 0x86,
-        S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d;
+        S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d, S_COUNTDOWN = 0x95;
     const int PROTO = 2;
     public const long SCENE_BASE = 1L << 51;
     const long OWNER_UNIT = 1L << 40;
@@ -201,6 +207,15 @@ public static class ZbNet
         hostListed = false;
         if (Active && Network.isServer) SendListing();
     }
+    // host only: wave / started / ended / players alive (+ seconds left of the Quick Play auto start) for the server list
+    public static void SendMeta(int wave, int flags, int alive, int countdown)
+    {
+        if (!Connected || !Network.isServer) return;
+        w.Begin(C_META).U16(wave).U8(flags).U8(alive).U8(countdown);
+        Queue();
+    }
+    public static void Run(IEnumerator e) { EnsureRunner(); runner.StartCoroutine(e); }
+
     static void SendListing()
     {
         w.Begin(C_LISTING).U8(hostListed ? 1 : 0).Str8(roomName, 40).Str8(hostComment, 60).Str8(hostType, 40);
@@ -216,6 +231,8 @@ public static class ZbNet
 
     static void ResetSession()
     {
+        ZbWs.SetRoomUi("", false);
+        ZbMenu.OnCountdown(0);
         mode = Mode.Offline; synced = false; remoteCount = 0; roomCode = ""; counter = 0; localId = 0;
         outLen = 0; playerIp.Clear(); playerPing.Clear(); pendingRpcs.Clear(); myPing = 0; ZbSync.Reset(); nextEcho = 0;
         fastLen = 0; fastAny = fastAll = false; parked.Clear(); laneUp.Clear(); ctxViaDc = false;
@@ -716,6 +733,7 @@ public static class ZbNet
             case S_WELCOME:
             {
                 localId = r.I32(); bool isHost = r.U8() == 1; int max = r.U8(); roomCode = r.Str8();
+                ZbWs.SetRoomUi(roomCode, isHost);
                 if (isHost) { mode = Mode.Host; if (hostListed) SendListing(); Notify("OnServerInitialized"); return true; }
                 mode = Mode.Client; Network.peerType = NetworkPeerType.Client;
                 Notify("OnConnectedToServer");
@@ -774,6 +792,9 @@ public static class ZbNet
             }
             case S_SYNC_DONE:
                 synced = true;
+                break;
+            case S_COUNTDOWN: // phase 3: Quick Play room auto start, seconds left (0 = cancelled / started)
+                ZbMenu.OnCountdown(r.U8());
                 break;
             case S_TIME:
             {
@@ -941,10 +962,13 @@ public static class ZbNet
     }
 
     // ---- room list ---------------------------------------------------------------------------
-    [Serializable] class RoomRec { public string code, name, type, comment; public int players, max; public bool pw; }
+    [Serializable] class RoomRec { public string code, name, type, comment, colo, country; public int players, max, wave, age; public bool pw, started, ended; }
     [Serializable] class RoomList { public RoomRec[] rooms; }
     public static HostData[] hostList = new HostData[0];
+    public static int hostListStamp;                      // changes whenever hostList was replaced
     static int listRequest;
+    static readonly Dictionary<string, int> pingCache = new Dictionary<string, int>();
+    static readonly Dictionary<string, float> pingAt = new Dictionary<string, float>();
 
     public static void RequestHostList(string gameType)
     {
@@ -967,10 +991,46 @@ public static class ZbNet
                     res.Add(new HostData
                     {
                         gameType = r.type, gameName = r.name, comment = r.comment ?? "", connectedPlayers = r.players, playerLimit = r.max,
-                        passwordProtected = r.pw, ip = new[] { r.code }, port = 0, guid = r.code
+                        passwordProtected = r.pw, ip = new[] { r.code }, port = 0, guid = r.code,
+                        wave = r.wave, age = r.age, started = r.started, ended = r.ended, colo = r.colo ?? "", country = r.country ?? "",
+                        ping = pingCache.TryGetValue(r.code, out int pc) ? pc : -1
                     });
                 }
-            hostList = res.ToArray();
+            // not full first, then the lowest known ping, then the most players
+            res.Sort((a, b) =>
+            {
+                int fa = a.connectedPlayers >= a.playerLimit ? 1 : 0, fb = b.connectedPlayers >= b.playerLimit ? 1 : 0;
+                if (fa != fb) return fa - fb;
+                int pa = a.ping < 0 ? int.MaxValue : a.ping, pb = b.ping < 0 ? int.MaxValue : b.ping;
+                if (pa != pb) return pa < pb ? -1 : 1;
+                return b.connectedPlayers - a.connectedPlayers;
+            });
+            hostList = res.ToArray(); hostListStamp++;
+            runner.StartCoroutine(ProbePings(hostList, req));
+        }
+    }
+
+    // Ping estimate: round trip of GET /api/ping/CODE (browser -> edge -> the room's Durable Object -> back), min of 2, for the first 8 rows,
+    // at most once per 10 s per room. This is the path a player's game traffic takes through the relay.
+    static IEnumerator ProbePings(HostData[] rows, int req)
+    {
+        for (int i = 0; i < rows.Length && i < 8; i++)
+        {
+            var h = rows[i]; string code = h.guid;
+            float last; if (pingAt.TryGetValue(code, out last) && Time.unscaledTime - last < 10f) continue;
+            pingAt[code] = Time.unscaledTime;
+            int best = int.MaxValue;
+            for (int k = 0; k < 2; k++)
+            {
+                using (var wr = UnityWebRequest.Get(ZbWs.Origin() + "/api/ping/" + Uri.EscapeDataString(code)))
+                {
+                    double t0 = ZbWs.Now();
+                    yield return wr.SendWebRequest();
+                    if (wr.result == UnityWebRequest.Result.Success) best = Math.Min(best, (int)Math.Round(ZbWs.Now() - t0));
+                }
+                if (req != listRequest) yield break;
+            }
+            if (best != int.MaxValue) { pingCache[code] = best; h.ping = best; }
         }
     }
     public static void ClearHostList() { listRequest++; hostList = new HostData[0]; }
@@ -991,6 +1051,7 @@ public class NetRunner : MonoBehaviour
     void Update()
     {
         ZbNet.Tick();
+        ZbMenu.Tick();
         ZbSync.TickRates();
         fpsDt += (Time.unscaledDeltaTime - fpsDt) * 0.05f;
         if (Input.GetKeyDown(KeyCode.F3)) showStats = !showStats;
@@ -1012,7 +1073,7 @@ public class NetRunner : MonoBehaviour
     {
         var g = FindFirstObjectByType<sc_gamecontrol>(); if (g == null) return;
         Debug.Log("ZBPREFS {\"money\":" + g.money + ",\"skin\":" + g.my_skincolor + ",\"beard\":" + g.my_beard + ",\"beardcolor\":" + g.my_beardcolor + ",\"shirt\":" + g.my_shirtcolor
-            + ",\"nick\":\"" + g.playernick + "\",\"inv3\":" + g.invent[3] + ",\"vol\":" + g.audiovol + "}");
+            + ",\"nick\":\"" + g.playernick + "\",\"inv3\":" + g.invent[3] + ",\"vol\":" + g.audiovol + ",\"sens\":" + g.mousesense + ",\"fov\":" + ZbSettings.fov + ",\"invy\":" + (ZbSettings.invertY ? 1 : 0) + ",\"quality\":" + ZbSettings.quality + ",\"qlevel\":" + QualitySettings.GetQualityLevel() + ",\"gamestate\":" + g.gamestate + "}");
     }
 
     // Test/debug hook: unityInstance.SendMessage("ZbNetRunner", "DebugDump", "") prints one "ZBDUMP {json}" line to the console.
@@ -1171,8 +1232,11 @@ public class NetRunner : MonoBehaviour
     }
 
     GUIStyle style, boxStyle;
+    public void DebugSkipNick(string unused) { ZbMenu.DebugSkipNick(); }
+    public void DebugMenu(string unused) { Debug.Log("ZBMENU " + ZbMenu.DebugJson()); }
     void OnGUI()
     {
+        ZbMenu.OverlayGUI();
         if (!ZbNet.Connected || ZbNet.roomCode.Length == 0) return;
         if (style == null) { style = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.UpperRight }; style.normal.textColor = new Color(1f, 1f, 1f, 0.75f); }
         GUI.depth = -1000;

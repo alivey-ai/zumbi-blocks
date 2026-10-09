@@ -349,6 +349,7 @@ public class sc_gamecontrol : MonoBehaviour
 
 	public void save()
 	{
+		ZbMenu.BeforeSave(this);
 		PlayerPrefs.SetString("ZB_" + saveversion + "_prefname", playernick);
 		PlayerPrefs.SetInt("ZB_" + saveversion + "_my_beard", my_beard);
 		PlayerPrefs.SetInt("ZB_" + saveversion + "_my_beardcolor", my_beardcolor);
@@ -799,6 +800,10 @@ public class sc_gamecontrol : MonoBehaviour
 		//IL_0169: Invalid comparison between Unknown and I4
 		//IL_0179: Unknown result type (might be due to invalid IL or missing references)
 		//IL_017c: Invalid comparison between Unknown and I4
+		if (ZbMenu.QuickFail(this, error)) // phase 3: a Quick Play join that failed searches again / creates a room
+		{
+			return;
+		}
 		cam.parent = null;
 		cam.localPosition = Vector3.zero;
 		cam.localEulerAngles = Vector3.zero;
@@ -1747,8 +1752,9 @@ public class sc_gamecontrol : MonoBehaviour
 		int num7 = (int)((float)menulogo.width * 0.3f + 20f + ((float)Screen.width - ((float)menulogo.width * 0.3f + 20f)) / 2f);
 		if (gamestate == -1)
 		{
-			gamestate = 0;
+			gamestate = ZbMenu.EntryState(this); // phase 3: invite link (?room=CODE) or the normal main menu
 		}
+		ZbMenu.Gate(this); // phase 3: multiplayer entry screens ask for a nickname first
 		if (gamestate == 29)
 		{
 			sharedhud = 1;
@@ -1958,6 +1964,7 @@ public class sc_gamecontrol : MonoBehaviour
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 50), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 100), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			playernick = GUI.TextField(new Rect((float)(num7 - 50), (float)(Screen.height / 2 - 142), 200f, 30f), playernick, 10);
+			playernick = ZbMenu.FilterNick(playernick); // phase 3: letters, digits, space _ - . only
 			GUI.Label(new Rect((float)(num7 - 190), (float)(Screen.height / 2 - 145), 175f, 32f), language[languageset].frase[96]);
 			GUI.Label(new Rect((float)(num7 - 200), (float)(Screen.height / 2 - 95), 400f, 32f), language[languageset].frase[94] + " #" + (my_skincolor + 1));
 			if (GUI.Button(new Rect((float)(num7 + 160), (float)(Screen.height / 2 - 95), 30f, 32f), ">"))
@@ -2421,7 +2428,7 @@ public class sc_gamecontrol : MonoBehaviour
 			GUI.Box(new Rect(225f, 5f, (float)(Screen.width - 230), (float)(Screen.height - 250)), string.Empty);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height - 80), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height - 130), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
-			if (server_select < 0)
+			if (server_select < 0 || ZbMenu.Full(server_select))
 			{
 				GUI.color = Color.gray;
 				GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height - 180), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
@@ -2486,6 +2493,7 @@ public class sc_gamecontrol : MonoBehaviour
 			GUI.color = Color.white;
 			GUI.Label(new Rect(275f, 10f, 90f, 19f), language[languageset].frase[100]);
 			GUI.Label(new Rect(225f, 10f, 50f, 19f), "#");
+			ZbMenu.ListHeader(this); // phase 3: Wave / Ping / Region / Players columns
 			if (MasterServer.PollHostList().Length != 0)
 			{
 				hostData = MasterServer.PollHostList();
@@ -2541,7 +2549,8 @@ public class sc_gamecontrol : MonoBehaviour
 						val2.y = (float)Screen.height - Input.mousePosition.y;
 						GUI.skin = newgui_square3;
 						GUI.Label(new Rect(230f, (float)(35 + 20 * num), 40f, 19f), num2.ToString());
-						GUI.Label(new Rect((float)(Screen.width - 123), (float)(35 + 20 * num), 90f, 19f), hostData[num2].connectedPlayers.ToString() + "/16");
+						GUI.Label(new Rect((float)(Screen.width - 123), (float)(35 + 20 * num), 90f, 19f), hostData[num2].connectedPlayers.ToString() + "/" + hostData[num2].playerLimit);
+						ZbMenu.ListRow(this, hostData[num2], (float)(35 + 20 * num));
 						GUI.skin = newgui_square2;
 						if (GUI.Button(new Rect(275f, (float)(35 + 20 * num), 400f, 19f), hostData[num2].gameName))
 						{
@@ -2681,6 +2690,7 @@ public class sc_gamecontrol : MonoBehaviour
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 - 0), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 100), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.color = Color.white;
+			ZbMenu.MainMenuQuick(this, num7); // phase 3: Quick Play row above Play
 			if (GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 - 95), 400f, 32f), language[languageset].frase[1]))
 			{
 				gamestate = 24;
@@ -2702,6 +2712,7 @@ public class sc_gamecontrol : MonoBehaviour
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 50), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.Label(new Rect((float)(num7 - 200), (float)(Screen.height / 2 + 55), 400f, 32f), language[languageset].frase[75]);
 		}
+		ZbMenu.Draw(this, num7); // phase 3: states 30 nickname, 31 Quick Play, 32 invite, 33 settings
 		if (gamestate == 13)
 		{
 			if (GUI.Button(new Rect((float)(Screen.width / 2 - 200), (float)(Screen.height / 2 - 35), 400f, 32f), language[languageset].frase[49]))
@@ -2990,7 +3001,12 @@ public class sc_gamecontrol : MonoBehaviour
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 - 50), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 - 0), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 50), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
+			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 100), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.color = Color.white;
+			if (GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 + 55), 400f, 32f), "All settings")) // phase 3
+			{
+				gamestate = ZbMenu.ST_SETTINGS;
+			}
 			if (GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 - 95), 400f, 32f), language[languageset].frase[16]))
 			{
 				gamestate = 10;
@@ -3018,7 +3034,7 @@ public class sc_gamecontrol : MonoBehaviour
 					}
 				}
 			}
-			if (GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 + 55), 400f, 32f), language[languageset].frase[3]))
+			if (GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 + 105), 400f, 32f), language[languageset].frase[3]))
 			{
 				gamestate = 0;
 				errormsg = language[languageset].frase[9];

@@ -23,6 +23,12 @@
     #bar-row { width: 1280px; max-width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; color: #8d9a88; flex-wrap: wrap; }
     #fs { background: #222a22; color: #dfe8da; border: 1px solid #36423a; padding: 6px 14px; font: inherit; cursor: pointer; }
     #fs:hover { background: #2c372c; }
+    #invite { width: 1280px; max-width: 100%; display: none; align-items: center; gap: 10px; margin-top: 8px; padding: 6px 10px; background: #1a211a; border: 1px solid #2a312a; font-size: 13px; flex-wrap: wrap; }
+    #invite b { color: #e6ede1; letter-spacing: 0.1em; }
+    #invite-url { flex: 1; min-width: 180px; background: #0d0f0d; color: #c9d1c4; border: 1px solid #36423a; padding: 5px 8px; font: inherit; }
+    #invite-copy { background: #222a22; color: #dfe8da; border: 1px solid #36423a; padding: 6px 14px; font: inherit; cursor: pointer; }
+    #invite-copy:hover { background: #2c372c; }
+    #invite-msg { color: #8fc760; min-width: 60px; }
     a { color: #8fc760; }
     a:hover { color: #b4e089; }
     .credit { margin-top: 18px; text-align: center; max-width: 760px; }
@@ -71,8 +77,14 @@
     <div id="warning"></div>
   </div>
   <div id="bar-row">
-    <span>Create a server and share the room code, or pick a room from the list (Join server / Direct IP takes the room code). Hosts: keep this tab visible, browsers pause background tabs.</span>
+    <span>Quick Play joins an open game (or starts one), or create a server and share the invite link / room code, or pick a room from the list (Join server / Direct IP takes the room code). Hosts: keep this tab visible, browsers pause background tabs.</span>
     <button id="fs" type="button">Fullscreen</button>
+  </div>
+  <div id="invite">
+    <span>Room <b id="invite-code"></b></span>
+    <input id="invite-url" type="text" readonly aria-label="Invite link">
+    <button id="invite-copy" type="button">Copy invite link</button>
+    <span id="invite-msg"></span>
   </div>
   <p class="credit">Zumbi Blocks by Adrian (AdrianKS) &mdash; <a href="https://store.steampowered.com/app/1941780/Zumbi_Blocks_2_Open_Alpha/" target="_blank" rel="noopener">play Zumbi Blocks 2 on Steam</a></p>
   <p class="small">Unofficial web revival of the original 2013 game, hosted with the author's permission.</p>
@@ -80,6 +92,26 @@
 
   <script>
     var canvas = document.querySelector("#unity-canvas");
+    // Invite link bar: Unity calls zbSetRoom(code, hosting) when it joins / leaves a room (ZbSetRoomUi in ZbNet.jslib).
+    // The copy runs from a real click on this DOM button: the clipboard API is unreliable from inside the game canvas.
+    // The link never contains a password (password rooms ask for it after the link is opened).
+    window.zbInviteUrl = "";
+    window.zbSetRoom = function (code, hosting) {
+      var bar = document.querySelector("#invite");
+      if (!code) { bar.style.display = "none"; window.zbInviteUrl = ""; return; }
+      window.zbInviteUrl = location.origin + "/?room=" + encodeURIComponent(code);
+      document.querySelector("#invite-code").textContent = code;
+      document.querySelector("#invite-url").value = window.zbInviteUrl;
+      document.querySelector("#invite-msg").textContent = "";
+      bar.style.display = "flex";
+    };
+    document.querySelector("#invite-copy").onclick = function () {
+      var msg = document.querySelector("#invite-msg"), input = document.querySelector("#invite-url");
+      var done = function (ok) { msg.textContent = ok ? "Copied!" : "Press Ctrl+C"; setTimeout(function () { msg.textContent = ""; }, 3000); };
+      var fallback = function () { input.focus(); input.select(); var ok = false; try { ok = document.execCommand("copy"); } catch (e) {} done(ok); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(window.zbInviteUrl).then(function () { done(true); }, fallback);
+      else fallback();
+    };
     function showBanner(msg, type) {
       var wb = document.querySelector("#warning");
       var d = document.createElement("div");

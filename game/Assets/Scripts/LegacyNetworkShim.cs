@@ -69,6 +69,10 @@ public class HostData
     public bool passwordProtected;
     public string comment = "";
     public string guid = "";
+    // phase 3 (server list): from the relay's room list; ping = -1 until measured
+    public int wave, age, ping = -1;
+    public bool started, ended;
+    public string colo = "", country = "";
 }
 
 public static class MasterServer

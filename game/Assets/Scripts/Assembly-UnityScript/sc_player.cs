@@ -2820,7 +2820,7 @@ public class sc_player : MonoBehaviour
 		}
 		if (controled)
 		{
-			headang += Input.GetAxis("Mouse Y") * mouse_sense;
+			headang += ZbSettings.MouseY() * mouse_sense; // phase 3: invert Y option
 		}
 		if (!(headang <= (float)headanglim))
 		{

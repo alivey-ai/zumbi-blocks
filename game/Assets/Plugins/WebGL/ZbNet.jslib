@@ -109,6 +109,18 @@ mergeInto(LibraryManager.library, {
     stringToUTF8(o, p, n);
     return p;
   },
+  // Invite link bar of the page (index.html): shown while in a room. hosting: 1 = this tab is the host.
+  ZbSetRoomUi: function (codePtr, hosting) {
+    var code = UTF8ToString(codePtr);
+    if (window.zbSetRoom) { try { window.zbSetRoom(code, hosting | 0); } catch (e) {} }
+  },
+  // Drop ?room= from the address once the invite was used, so a refresh after leaving does not join again.
+  ZbClearInvite: function () {
+    try {
+      var u = new URL(location.href); u.searchParams.delete('room'); u.searchParams.delete('pw');
+      history.replaceState(null, '', u.pathname + (u.search || '') + u.hash);
+    } catch (e) {}
+  },
   // The page's query string ("?netsim=120,30&legacy=1"), for the debug/test switches in ZbNet.cs.
   ZbQuery: function () {
     var o = location.search || '';

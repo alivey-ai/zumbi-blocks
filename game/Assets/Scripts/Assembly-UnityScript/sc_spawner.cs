@@ -1232,6 +1232,7 @@ public class sc_spawner : MonoBehaviour
 			}
 			if (GUI.Button(new Rect((float)(Screen.width / 2 - 200), (float)(Screen.height / 2 - 0), 400f, 32f), ((sc_gamecontrol)(object)((Component)gamecontrol).GetComponent(typeof(sc_gamecontrol))).language[((sc_gamecontrol)(object)((Component)gamecontrol).GetComponent(typeof(sc_gamecontrol))).languageset].frase[2]))
 			{
+				ZbMenu.overlay = true; // phase 3: the pause panel's Options button did nothing in the original; it opens the settings
 			}
 			if (GUI.Button(new Rect((float)(Screen.width / 2 - 200), (float)(Screen.height / 2 + 35), 400f, 32f), ((sc_gamecontrol)(object)((Component)gamecontrol).GetComponent(typeof(sc_gamecontrol))).language[((sc_gamecontrol)(object)((Component)gamecontrol).GetComponent(typeof(sc_gamecontrol))).languageset].frase[39]))
 			{
