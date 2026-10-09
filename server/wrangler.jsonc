@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
+  "routes": [{ "pattern": "zumbi-blocks-classic.vitosenic.com", "custom_domain": true }],
   "assets": {
     "directory": "../game/Build/WebGL",
     "binding": "ASSETS",

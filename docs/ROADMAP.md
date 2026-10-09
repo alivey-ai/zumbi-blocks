@@ -2,7 +2,9 @@
 
 Rule: **gameplay stays exactly like the original v0.7.** Everything here is around it: connection quality, getting into games, community.
 
-Live: https://zumbi-blocks.vito-senic.workers.dev (Adrian approved public hosting 2026-10-09).
+Live: https://zumbi-blocks-classic.vitosenic.com (also https://zumbi-blocks.vito-senic.workers.dev). Adrian approved public hosting 2026-10-09.
+
+**Cost rule: must stay $0.** Cloudflare Workers Free plan only (free limits fail closed, never bill). Phase 2 (WebRTC) is also the cost fix: the Durable Object only signals, so relay traffic leaves the free quota. No paid TURN; strict-NAT players fall back to the WebSocket relay. If it ever outgrows the free quota, the backstop is a flat-price Hetzner VPS relay (~EUR 4-5/mo), not the $5 Cloudflare plan.
 
 ## Phase 1 — Feel (done, see docs/MULTIPLAYER.md "Feel layer")
 Make online play feel smooth without changing the network architecture.
@@ -37,4 +39,5 @@ Make online play feel smooth without changing the network architecture.
 
 ## Phase 6 — Official & distribution (with Adrian)
 - Brand it **Zumbi Blocks Classic** with Adrian; "Play Zumbi Blocks 2 on Steam" in the main menu.
-- List it on web game portals (CrazyGames, Poki, itch.io, Y8 again) — this is where the original audience came from.
+- List it on web game portals (itch.io, Y8, CrazyGames, Poki) — this is where the original audience came from.
+  - Prereqs: Adrian's written OK for portals specifically + agreement on ad revenue (ideally he submits under his account, or revenue goes to/split with him); CrazyGames SDK (portal build only); smaller initial download; desktop-only gate for mobile visitors.
