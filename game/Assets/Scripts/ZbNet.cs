@@ -998,6 +998,23 @@ public class NetRunner : MonoBehaviour
     void LateUpdate() { ZbNet.LateTick(); }
     void OnApplicationQuit() { ZbNet.Shutdown(); }
 
+    // Test hooks for server/test/e2e/save.mjs. DebugSetSave("money,skin,beard,beardcolor,shirt,nick") sets those values on sc_gamecontrol and
+    // calls its save() (what the menu does); DebugPrefs prints one "ZBPREFS {json}" line with what sc_gamecontrol currently holds (loaded from PlayerPrefs at start).
+    public void DebugSetSave(string csv)
+    {
+        var g = FindFirstObjectByType<sc_gamecontrol>(); if (g == null) return;
+        var f = csv.Split(',');
+        g.money = int.Parse(f[0]); g.my_skincolor = int.Parse(f[1]); g.my_beard = int.Parse(f[2]); g.my_beardcolor = int.Parse(f[3]); g.my_shirtcolor = int.Parse(f[4]);
+        g.playernick = f[5]; g.invent[3] = 5; g.audiovol = 0.5f;
+        g.save();
+    }
+    public void DebugPrefs(string unused)
+    {
+        var g = FindFirstObjectByType<sc_gamecontrol>(); if (g == null) return;
+        Debug.Log("ZBPREFS {\"money\":" + g.money + ",\"skin\":" + g.my_skincolor + ",\"beard\":" + g.my_beard + ",\"beardcolor\":" + g.my_beardcolor + ",\"shirt\":" + g.my_shirtcolor
+            + ",\"nick\":\"" + g.playernick + "\",\"inv3\":" + g.invent[3] + ",\"vol\":" + g.audiovol + "}");
+    }
+
     // Test/debug hook: unityInstance.SendMessage("ZbNetRunner", "DebugDump", "") prints one "ZBDUMP {json}" line to the console.
     public void DebugDump(string unused)
     {

@@ -373,6 +373,7 @@ public class sc_gamecontrol : MonoBehaviour
 		{
 			PlayerPrefs.SetInt("ZB_" + saveversion + "_invent" + i, invent[i]);
 		}
+		PlayerPrefs.Save(); // WebGL port: flush to IndexedDB now, otherwise the data is lost when the tab is closed
 	}
 
 	public void load()
