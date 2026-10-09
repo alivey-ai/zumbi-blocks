@@ -22,13 +22,14 @@ const listing = (listed, name) => { const n = enc.encode(name); return new Uint8
 
 class Client {
   constructor(path) {
-    this.msgs = []; this.waiters = []; this.closed = false;
+    this.msgs = []; this.frames = []; this.waiters = []; this.closed = false;
     this.ws = new WebSocket(`ws://${BASE}${path}`);
     this.ws.binaryType = "arraybuffer";
     this.ws.on("message", (d) => {
       const f = new Uint8Array(d);
-      let o = 0;
-      while (o + 2 <= f.length) { const len = f[o] | (f[o + 1] << 8); o += 2; this.msgs.push(f.slice(o, o + len)); o += len; }
+      let o = 0; const fr = [];
+      while (o + 2 <= f.length) { const len = f[o] | (f[o + 1] << 8); o += 2; const m = f.slice(o, o + len); this.msgs.push(m); fr.push(m); o += len; }
+      this.frames.push(fr);
       this.pump();
     });
     this.ws.on("close", () => { this.closed = true; this.pump(); });
@@ -53,13 +54,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const dv = (m) => new DataView(m.buffer, m.byteOffset, m.byteLength);
 
 async function host(extra = "") {
-  const h = new Client(`/ws/host?v=1&max=3&name=Test+Room${extra}`); await h.opened;
+  const h = new Client(`/ws/host?v=2&max=3&name=Test+Room${extra}`); await h.opened;
   const w = await h.take(0x81);
   const code = new TextDecoder().decode(w.subarray(5 + 3, 5 + 3 + w[7]));
   return { h, code, id: dv(w).getInt32(1, true), isHost: w[5] };
 }
 async function join(code, extra = "") {
-  const c = new Client(`/ws/room/${code}?v=1${extra}`); await c.opened; return c;
+  const c = new Client(`/ws/room/${code}?v=2${extra}`); await c.opened; return c;
 }
 
 let ok = 0;
@@ -172,6 +173,84 @@ await test("ping/pong and ping info reaches host", async () => {
   const p = await a.take(0x88); assert.deepEqual([...p.subarray(1)], [1, 2, 3, 4]);
   const info = await h.take(0x89); assert.equal(dv(info).getInt32(1, true), 1); assert.equal(info[5], 44);
   [h, a].forEach((x) => x.close());
+});
+
+
+// ---- feel layer (protocol 2): frame batching, sender clock, compact state messages, end-to-end echo ----
+const stamp = (ms) => { const b = new Uint8Array(5); b[0] = 9; new DataView(b.buffer).setUint32(1, ms, true); return b; };
+const state = (kind, v, payloadLen) => { const b = new Uint8Array(10 + payloadLen); b[0] = 11; b[1] = kind; putView(b, 2, v); for (let i = 0; i < payloadLen; i++) b[10 + i] = (i * 7 + kind) & 255; return b; };
+const echo = (type, target, t) => { const b = new Uint8Array(10); b[0] = 10; b[1] = type; new DataView(b.buffer).setInt32(2, target, true); new DataView(b.buffer).setUint32(6, t, true); return b; };
+
+await test("batching: everything from one frame reaches each recipient as one frame, in order, led by the sender's clock", async () => {
+  const { h, code } = await host();
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code); await b.take(0x8a); await h.take(0x85);
+  a.frames.length = 0; b.frames.length = 0;
+  const V = SCENE(11);
+  h.send(stamp(123456), state(1, V, 14), rpc(1, V, "r1"), state(2, V, 28), rpc(1, V, "r2"), state(3, V, 12));
+  await a.take(0x8d); await b.take(0x8d); await sleep(150);
+  for (const c of [a, b]) {
+    assert.equal(c.frames.length, 1, "one WebSocket frame per recipient");
+    assert.deepEqual(c.frames[0].map((m) => m[0]), [0x8b, 0x8d, 0x82, 0x8d, 0x82, 0x8d], "S_TIME first, then the messages in send order");
+    const t = c.frames[0][0]; assert.equal(dv(t).getInt32(1, true), 0); assert.equal(dv(t).getUint32(5, true), 123456);
+  }
+  // a frame without clock stays without S_TIME
+  a.frames.length = 0;
+  h.send(rpc(1, V, "noclock")); await sleep(200); assert.equal(a.frames.length, 1); assert.equal(a.frames[0].map((m) => m[0]).join(), "130");
+  // a client frame going to two different recipients (host + other client): one frame each
+  h.frames.length = 0; b.frames.length = 0;
+  a.send(stamp(5), rpc(2, V, "x1"), rpc(2, V, "x2"), rpc(2, V, "x3"));
+  await h.take(0x82); await b.take(0x82); await sleep(150);
+  assert.equal(h.frames.length, 1); assert.equal(b.frames.length, 1);
+  assert.equal(h.frames[0].length, 4); assert.equal(dv(h.frames[0][0]).getInt32(1, true), 1);
+  [h, a, b].forEach((x) => x.close());
+});
+
+await test("batching: a large frame (many messages) is routed completely", async () => {
+  const { h, code } = await host();
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  a.frames.length = 0;
+  const bodies = [stamp(1)]; for (let i = 0; i < 400; i++) bodies.push(state(1, SCENE(100 + i), 14));
+  h.send(...bodies);
+  await sleep(500);
+  assert.equal(a.count(0x8d), 400); assert.equal(a.frames.length, 1);
+  [h, a].forEach((x) => x.close());
+});
+
+await test("state messages: forwarded to the others only, unbuffered, bad lengths dropped", async () => {
+  const { h, code } = await host();
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code); await b.take(0x8a); await h.take(0x85);
+  const V = SCENE(21);
+  const s1 = state(1, V, 14), s2 = state(2, V, 28), s3 = state(3, V, 12);
+  a.send(s1, s2, s3);
+  for (const [i, s] of [s1, s2, s3].entries()) {
+    const gh = await h.take(0x8d), gb = await b.take(0x8d);
+    assert.deepEqual([...gh.subarray(1)], [...s.subarray(1)], "payload kind " + (i + 1) + " to host");
+    assert.deepEqual([...gb.subarray(1)], [...s.subarray(1)]);
+  }
+  await a.none(0x8d, 200);
+  a.send(state(1, V, 13), state(4, V, 14), new Uint8Array([11]));
+  await h.none(0x8d, 300);
+  b.close(); await sleep(200);
+  const late = await join(code); await late.take(0x8a); assert.equal(late.count(0x8d), 0, "state is not replayed to late joiners");
+  [h, a, b, late].forEach((x) => x.close());
+});
+
+await test("echo: client <-> host only, sender id stamped, payload preserved", async () => {
+  const { h, code } = await host();
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code); await b.take(0x8a); await h.take(0x85);
+  a.send(echo(0, 0, 0xdeadbeef));
+  const e = await h.take(0x8c); assert.equal(dv(e).getInt32(1, true), 1); assert.equal(e[5], 0); assert.equal(dv(e).getUint32(6, true), 0xdeadbeef);
+  h.send(echo(1, 1, 777));
+  const r = await a.take(0x8c); assert.equal(dv(r).getInt32(1, true), 0); assert.equal(r[5], 1); assert.equal(dv(r).getUint32(6, true), 777);
+  a.send(echo(0, 2, 1)); // client to another client: not allowed
+  b.send(echo(0, 1, 1));
+  await b.none(0x8c, 250); await a.none(0x8c, 10); await h.none(0x8c, 10);
+  h.send(echo(0, 9, 1), echo(0, 0, 1)); // unknown target / to self
+  await sleep(200); assert.equal(h.count(0x8c) + a.count(0x8c) + b.count(0x8c), 0);
+  [h, a, b].forEach((x) => x.close());
 });
 
 console.log(`${ok} tests passed`);

@@ -3,18 +3,20 @@
 import { DurableObject } from "cloudflare:workers";
 
 // client -> relay
-const C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8;
+const C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11;
 // relay -> client
 const S_WELCOME = 0x81, S_RPC = 0x82, S_INST = 0x83, S_DESTROY = 0x84, S_CONNECTED = 0x85, S_DISCONNECTED = 0x86,
-  S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a;
+  S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d;
 // reject / close reasons
 export const R_NOT_FOUND = 1, R_BAD_PASSWORD = 2, R_FULL = 3, R_HOST_LEFT = 4, R_KICKED = 5, R_RATE = 6, R_PROTO = 7;
 
-const PROTO = 1;
+const PROTO = 2;
 const SCENE_BASE = 2 ** 51; // view ids >= this belong to scene objects (owner = host)
 const OWNER_UNIT = 2 ** 40; // instantiated view id = (owner + 1) * 2^40 + counter * 2^12 + sub
 const MAX_BODY = 8192; // max size of one message body
 const MAX_FRAME = 65536;
+// body length of the compact state messages by kind (C_STATE: op, kind, view i64, payload)
+const STATE_LEN = { 1: 24, 2: 38, 3: 22 };
 const MAX_MSGS_PER_FRAME = 512;
 const MAX_BUFFER_ENTRIES = 20000;
 const MAX_BUFFER_PER_SENDER = 8000;
@@ -153,14 +155,23 @@ export class Room extends DurableObject {
 
     const out = new Map(); // ws -> bodies
     const emit = (target, body) => { let l = out.get(target); if (!l) out.set(target, (l = [])); l.push(body); };
+    const ctx = { stamp: null }; // sender clock of this frame (C_TIME), passed on to every recipient
     let o = 0, count = 0;
     while (o + 2 <= frame.length && count++ < MAX_MSGS_PER_FRAME) {
       const len = frame[o] | (frame[o + 1] << 8); o += 2;
       if (len < 1 || len > MAX_BODY || o + len > frame.length) break;
-      try { this.handle(ws, att, frame.subarray(o, o + len), emit); } catch (e) { console.log("handle error", String(e)); }
+      try { this.handle(ws, att, frame.subarray(o, o + len), emit, ctx); } catch (e) { console.log("handle error", String(e)); }
       o += len;
     }
-    for (const [target, bodies] of out) this.sendNow(target, bodies);
+    // One WebSocket frame per recipient for everything this frame produced; with the sender's clock in front so the
+    // recipient can interpolate on the sender's timeline (S_TIME: i32 sender, u32 clock).
+    for (const [target, bodies] of out) {
+      if (ctx.stamp && target !== ws) {
+        const t = new Uint8Array(9); t[0] = S_TIME; putI32(t, 1, att.id); t.set(ctx.stamp, 5);
+        bodies.unshift(t);
+      }
+      this.sendNow(target, bodies);
+    }
   }
 
   takeTokens(ws, att, n) {
@@ -175,7 +186,7 @@ export class Room extends DurableObject {
     return true;
   }
 
-  handle(ws, att, b, emit) {
+  handle(ws, att, b, emit, ctx = {}) {
     const me = att.id;
     switch (b[0]) {
       case C_RPC: {
@@ -251,6 +262,28 @@ export class Room extends DurableObject {
           const h = this.players.get(0);
           if (h) { const info = new Uint8Array(7); info[0] = S_PING_INFO; putI32(info, 1, me); info[5] = b[5]; info[6] = b[6]; emit(h, info); }
         }
+        return;
+      }
+      case C_TIME: {
+        if (b.length === 5) ctx.stamp = b.slice(1, 5);
+        return;
+      }
+      case C_STATE: {
+        // compact position updates (what used to be RPCs setzumbistuff / setposstuff / updateposition, mode Others, unbuffered)
+        if (b.length < 2 || STATE_LEN[b[1]] !== b.length) return;
+        const out = new Uint8Array(b.length); out.set(b); out[0] = S_STATE;
+        for (const [id, w] of this.players) if (id !== me) emit(w, out);
+        return;
+      }
+      case C_ECHO: {
+        // end to end ping: clients may only echo with the host, the host with anyone. body: u8 type, i32 target, u32 t
+        if (b.length !== 10 || b[1] > 1) return;
+        const target = i32(b, 2);
+        if (target === me || (me !== 0 && target !== 0)) return;
+        const w = this.players.get(target);
+        if (!w) return;
+        const out = new Uint8Array(10); out[0] = S_ECHO; putI32(out, 1, me); out[5] = b[1]; out.set(b.subarray(6, 10), 6);
+        emit(w, out);
         return;
       }
       case C_LISTING: {
