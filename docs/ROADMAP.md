@@ -4,7 +4,7 @@ Rule: **gameplay stays exactly like the original v0.7.** Everything here is arou
 
 Live: https://zumbi-blocks-classic.vitosenic.com (also https://zumbi-blocks.vito-senic.workers.dev). Adrian approved public hosting 2026-10-09.
 
-**Cost rule: must stay $0.** Cloudflare Workers Free plan only (free limits fail closed, never bill). Phase 2 (WebRTC) is also the cost fix: the Durable Object only signals, so relay traffic leaves the free quota. No paid TURN; strict-NAT players fall back to the WebSocket relay. If it ever outgrows the free quota, the backstop is a flat-price Hetzner VPS relay (~EUR 4-5/mo), not the $5 Cloudflare plan.
+**Cost rule: must stay $0.** Cloudflare Workers Free plan only (free limits fail closed, never bill). Phase 2 (WebRTC) is also the cost fix: the more traffic goes over direct channels, the less the Durable Object receives (first release: host state only, see Phase 2). No paid TURN; strict-NAT players fall back to the WebSocket relay. If it ever outgrows the free quota, the backstop is a flat-price Hetzner VPS relay (~EUR 4-5/mo), not the $5 Cloudflare plan.
 
 ## Phase 1 — Feel (done, see docs/MULTIPLAYER.md "Feel layer")
 Make online play feel smooth without changing the network architecture.
@@ -14,10 +14,14 @@ Make online play feel smooth without changing the network architecture.
 - [x] **Batching**: send all messages from one frame in one WebSocket frame (existed; relay stamps and tests added) + compact state messages (about half the bytes per update) + about 20 Hz state rate.
 - [x] **Latency test mode** (`?netsim=RTT,JITTER`): artificial delay/jitter in local tests so we can prove improvements.
 
-## Phase 2 — Direct connection (browser to browser)
-- WebRTC DataChannels between host and each client: unreliable/unordered channel for position updates, reliable channel for RPCs.
-- The Durable Object becomes only the matchmaker/signaling server; Cloudflare TURN as fallback when a direct connection fails; WebSocket relay stays as last fallback.
-- Expected: no extra hop through Cloudflare, no head-of-line blocking — LAN-like feel for nearby players.
+## Phase 2 — Direct connection (browser to browser) (first release done, see docs/MULTIPLAYER.md "Data channel lane")
+- [x] WebRTC DataChannel between host and each client, unordered / `maxRetransmits 0`, for host to client position updates and echo probes. Everything else (RPC, INST, DESTROY) stays on the WebSocket relay.
+- [x] The Durable Object also does signaling (JSON text frames on the existing socket); health checks with hysteresis, automatic fallback to the WebSocket path, `?p2p=0` kill switch, F3 overlay shows DC/WS and RTT per peer.
+- [x] Cost: STUN only (free public servers), no TURN, nothing that needs the Workers Paid plan. Peers that cannot connect directly stay on the relay.
+- [x] Privacy note (the host sees client IPs and vice versa) on the page and in the README.
+- [ ] Client to host state over the channel (2b): the only way to take the clients' own upstream (about 25 frames/s each) off the Durable Object; today host to Durable Object traffic dropped by about half, total by 30 to 40 % with one client.
+- [ ] Real-network verification (home + phone hotspot, different regions) and a week of `p2p-stat` log lines to learn the real direct-connect rate; only then decide on 2b.
+- Not planned: TURN (costs money), reliable channel for RPCs.
 
 ## Phase 3 — Getting into a game
 - Nickname on first launch (no accounts).
