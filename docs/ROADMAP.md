@@ -51,6 +51,6 @@ Make online play feel smooth without changing the network architecture.
 - ~~**Saves must survive closing the tab.**~~ DONE: `PlayerPrefs.Save()` at the end of `save()`; test `server/test/e2e/save.mjs`.
 - **Missing effects:** rifle muzzle flash, flare (Rflare_out), RPG smoke (shotRPG) used Unity 4 legacy particles, removed in Unity 6. Rebuild them with the Particle System to look like the originals.
 - **Multiplayer airdrop bag on clients:** e2e saw 0 bags on the client side; confirm whether clients actually see the dropped bag.
-- **Live e2e shooting checks failed once (3/42)** after the Phase 2 deploy; rerun and confirm flake vs real.
+- **Live e2e shooting checks** (2026-10-09, after the save/mannequin deploy): e2e.mjs against the live URL, 3 runs: 42/42, 41/42, 42/42. The one failure was "shooter sees own bullets immediately" (sample [0,186]: a point-in-time count of the shooter's bullets that read 0 once while 186 shots were counted overall). Local runs pass; B's received bullets passed in all 3 live runs. Judged a timing flake of the point sample (live RTT is higher, short bullet life), roughly 1 in 3 runs for that one check; no consistent live failure, nothing changed.
 - **Phase 2b:** client to host state over the data channel (the real Durable Object cost cut); check relay `p2p-stat` logs for the real-world direct-connect rate.
 - **Cloud "save code" (later, only if asked for):** short code like ZB-7K2M-Q9 to move a save between browsers, stored in D1, no accounts.
