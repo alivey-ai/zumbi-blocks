@@ -15,6 +15,7 @@ The game and its assets belong to Adrian (AdrianKS, now making Zumbi Blocks 2). 
 2. Ported to Unity 6 (6000.2.14f1) WebGL, single player works.
 3. Online multiplayer on Cloudflare: one player's browser hosts, a Worker + Durable Object relays (`docs/MULTIPLAYER.md`, `server/`).
 4. Resilience (phase 4): rate limits, desktop-only gate for phones, reconnect after a short drop, host leaves = players keep their money and a remaining player takes over the room, hidden host tab warning. Playtest additions: timed waves, wave number on the HUD, teammates' health.
+5. Community (phase 5): leaderboards in D1 (main menu > Leaderboard, web page panel), daily game counts (`/api/stats`), Cloudflare Web Analytics (`docs/LEADERBOARD.md`).
 
 ## Layout
 - `game/` Unity project. `Assets/Scripts/LegacyNetworkShim.cs` + `ZbNet.cs` + `Assets/Plugins/WebGL/ZbNet.jslib` implement the old Unity networking API on top of the relay. `Assets/Scripts/ZbMenu.cs` has the phase 3 menu logic (Quick Play, invite links, nickname prompt, settings, server list columns).
@@ -36,15 +37,20 @@ cd server && npm install
 npx wrangler dev          # http://localhost:8787  (serves ../game/Build/WebGL, /api, /ws; Durable Objects run locally)
 ```
 Open the page in two or more browser tabs/windows (keep the host's visible). Create server on one, join from the list or with the room code on the others.
-Relay tests (with `wrangler dev` running): `cd server && npm test`.
+Relay + leaderboard tests: `cd server && npm run dev:test` (fresh local state + D1 migrations, port 8799), then `BASE=localhost:8799 npm test`.
 
 ## Deploy (Cloudflare account Vito.senic@gmail.com, id c7d9cc74b0354c939de1012aebe158cb)
 ```
 cd server
 npx wrangler whoami       # must show Vito.senic@gmail.com's Account; otherwise run: npx wrangler login
+npx wrangler d1 migrations apply zumbi-blocks --remote   # leaderboard / stats schema (server/migrations); only needed when a new migration was added
 npx wrangler deploy       # uploads game/Build/WebGL as static assets + the Worker + Durable Object migrations
 ```
+One-time setup (already done): D1 database `zumbi-blocks` (`npx wrangler d1 create zumbi-blocks`, id in `server/wrangler.jsonc`) and the solo token secret `npx wrangler secret put ZB_SECRET`. Leaderboards, game counts and visitor analytics: `docs/LEADERBOARD.md`.
 Worker name `zumbi-blocks` on workers.dev, `account_id` is pinned in `server/wrangler.jsonc`. Rebuild the game first if the game code changed.
+
+## Privacy: leaderboard and analytics
+Finishing a match with the default rules puts the nickname, wave and kills on the public leaderboard. Page visits are counted with Cloudflare Web Analytics (cookieless, no personal data). Both are stated on the game page.
 
 ## Privacy: peer-to-peer connection
 Online play tries a direct browser-to-browser connection (WebRTC data channel, free public STUN servers only, no TURN) between the host and each player for the high-rate position updates. **This exposes IP addresses to the other end: the host's browser sees every player's IP and each player sees the host's.** Everything else, and everyone who cannot connect directly, goes through the Cloudflare relay as before. Add `?p2p=0` to the page address to turn it off completely. (Same note is shown on the game page.)

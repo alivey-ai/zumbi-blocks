@@ -123,9 +123,9 @@ public class NetIdentity : MonoBehaviour
 public static partial class ZbNet
 {
     // wire opcodes
-    const byte C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11, C_META = 16, C_VIS = 17;
+    const byte C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11, C_META = 16, C_VIS = 17, C_SCORE = 20;
     const byte S_WELCOME = 0x81, S_RPC = 0x82, S_INST = 0x83, S_DESTROY = 0x84, S_CONNECTED = 0x85, S_DISCONNECTED = 0x86,
-        S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d, S_SEQ = 0x8e, S_HOST_STATE = 0x8f, S_COUNTDOWN = 0x95;
+        S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d, S_SEQ = 0x8e, S_HOST_STATE = 0x8f, S_COUNTDOWN = 0x95, S_RESULT = 0x96;
     const int PROTO = 3;
     public const long SCENE_BASE = 1L << 51;
     const long OWNER_UNIT = 1L << 40;
@@ -227,6 +227,16 @@ public static partial class ZbNet
     {
         if (!Connected || !Network.isServer) return;
         w.Begin(C_META).U16(wave).U8(flags).U8(alive).U8(countdown);
+        Queue();
+    }
+    // host only (phase 5, docs/LEADERBOARD.md): rules (1 Timed waves, 2 More loot), wave, and every player's name + kills; the relay records the
+    // last one it got when the match ends, the host leaves or the room closes
+    public static void SendScore(int rules, int wave, List<KeyValuePair<string, int>> players)
+    {
+        if (!Connected || !Network.isServer) return;
+        int n = Math.Min(16, players.Count);
+        w.Begin(C_SCORE).U8(rules).U16(Math.Min(wave, 65535)).U8(n);
+        for (int i = 0; i < n; i++) w.U16(Mathf.Clamp(players[i].Value, 0, 65535)).Str8(players[i].Key, 24);
         Queue();
     }
     public static void Run(IEnumerator e) { EnsureRunner(); runner.StartCoroutine(e); }
@@ -838,6 +848,12 @@ public static partial class ZbNet
             case S_COUNTDOWN: // phase 3: Quick Play room auto start, seconds left (0 = cancelled / started)
                 ZbMenu.OnCountdown(r.U8());
                 break;
+            case S_RESULT: // phase 5: the relay recorded the match: u8 board (0 solo, 1 team, 255 not ranked), u16 rank today, u16 rank all time
+            {
+                int board = r.U8(), today = r.U16(), all = r.U16();
+                ZbBoard.OnResult(board, today, all);
+                break;
+            }
             case S_TIME:
             {
                 int sender = r.I32(); double stamp = (uint)r.I32();
@@ -1360,6 +1376,17 @@ public class NetRunner : MonoBehaviour
     GUIStyle style, boxStyle;
     public void DebugSkipNick(string unused) { ZbMenu.DebugSkipNick(); }
     public void DebugMenu(string unused) { Debug.Log("ZBMENU " + ZbMenu.DebugJson()); }
+    // Test hooks (phase 5 leaderboard): DebugNick("zbt-abc") sets the nickname; DebugKills("5,3") sets the kills of the match's players (host: in
+    // spawner order, single player: the own one); DebugBoard opens the Leaderboard screen.
+    public void DebugNick(string a) { var g = FindFirstObjectByType<sc_gamecontrol>(); if (g == null) return; g.playernick = a; PlayerPrefs.SetInt("ZBX_nick_ok", 1); g.save(); }
+    public void DebugKills(string a)
+    {
+        var mc = FindFirstObjectByType<sc_matchcontroller>(); if (mc == null) return;
+        var f = a.Split(',');
+        var l = ZbBoard.Spawners(mc);
+        for (int i = 0; i < f.Length && i < l.Count; i++) l[i].kills = int.Parse(f[i]);
+    }
+    public void DebugBoard(string unused) { var g = FindFirstObjectByType<sc_gamecontrol>(); if (g != null) ZbBoard.Open(g); }
     void OnGUI()
     {
         ZbMenu.OverlayGUI();

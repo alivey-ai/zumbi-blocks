@@ -2369,7 +2369,7 @@ public class sc_gamecontrol : MonoBehaviour
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 - 0), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 50), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
 			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 100), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
-			if (GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 - 95), 400f, 32f), language[languageset].frase[99]))
+			if (GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 - 95), 400f, 32f), language[languageset].frase[99]) && !ZbMenu.SoloNick(this)) // phase 5: nickname first (leaderboard)
 			{
 				iamserver = true;
 				Network.InitializeSecurity();
@@ -2704,9 +2704,7 @@ public class sc_gamecontrol : MonoBehaviour
 				Application.Quit();
 				Application.ExternalEval("window.close()");
 			}
-			GUI.color = Color.gray;
-			GUI.DrawTexture(new Rect((float)(num7 - newhud[0].width / 2), (float)(Screen.height / 2 + 50), (float)newhud[0].width, (float)newhud[0].height), newhud[0], (ScaleMode)0, true, 0f);
-			GUI.Label(new Rect((float)(num7 - 200), (float)(Screen.height / 2 + 55), 400f, 32f), language[languageset].frase[75]);
+			ZbBoard.MainMenuButton(this, num7); // phase 5: Leaderboard in place of the original's unused grey "Credits" row (credits are on the web page)
 		}
 		ZbMenu.Draw(this, num7); // phase 3: states 30 nickname, 31 Quick Play, 32 invite, 33 settings
 		if (gamestate == 13)
@@ -3148,6 +3146,7 @@ public class sc_gamecontrol : MonoBehaviour
 			{
 				gamestate = 0;
 			}
+			ZbBoard.GameOverGUI(this, num7); // phase 5: where this match placed on the leaderboard
 		}
 		if (sharedhud == 2)
 		{

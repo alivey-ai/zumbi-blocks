@@ -37,6 +37,21 @@
     a:hover { color: #b4e089; }
     .credit { margin-top: 18px; text-align: center; max-width: 760px; }
     .small { margin-top: 8px; font-size: 12px; color: #6f7b6b; text-align: center; max-width: 760px; }
+    #lb { width: 1280px; max-width: 100%; margin-top: 14px; padding: 12px 14px 10px; background: #161a16; border: 1px solid #2a312a; }
+    #lb h2 { margin: 0 12px 0 0; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; color: #e6ede1; font-weight: 600; }
+    #lb .head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+    #lb .seg { display: inline-flex; border: 1px solid #36423a; }
+    #lb .seg button { background: #0d0f0d; color: #8d9a88; border: 0; padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+    #lb .seg button.on { background: #3a1a16; color: #f0dca0; box-shadow: inset 0 0 0 1px #b02a1e; }
+    #lb table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+    #lb th { text-align: left; color: #f0dca0; font-weight: 600; padding: 3px 6px; border-bottom: 1px solid #2a312a; }
+    #lb td { padding: 3px 6px; border-bottom: 1px solid #1d231d; }
+    #lb th.n, #lb td.n { text-align: right; width: 70px; }
+    #lb th.r, #lb td.r { width: 36px; color: #6f7b6b; }
+    #lb td.who { overflow-wrap: anywhere; }
+    #lb tr.top td.who { color: #f0dca0; }
+    #lb .empty { color: #6f7b6b; padding: 10px 6px; }
+    #lb .note { margin-top: 6px; font-size: 12px; color: #6f7b6b; }
   </style>
   <script src="zbrtc.js"></script>
   <script>
@@ -96,11 +111,62 @@
     <button id="invite-copy" type="button">Copy invite link</button>
     <span id="invite-msg"></span>
   </div>
+  <section id="lb" aria-label="Leaderboard">
+    <div class="head">
+      <h2>Leaderboard</h2>
+      <span class="seg" data-k="mode"><button data-v="solo" class="on">Solo</button><button data-v="team">Team</button></span>
+      <span class="seg" data-k="period"><button data-v="today">Today</button><button data-v="all" class="on">All time</button></span>
+      <span class="seg" data-k="metric"><button data-v="wave" class="on">Best wave</button><button data-v="kills">Most kills</button></span>
+    </div>
+    <table><thead><tr><th class="r">#</th><th id="lb-who">Player</th><th class="n">Wave</th><th class="n">Kills</th><th class="n" style="width:100px">Date</th></tr></thead><tbody id="lb-rows"><tr><td colspan="5" class="empty">Loading...</td></tr></tbody></table>
+    <div class="note">Matches with the default rules (Timed waves + More loot, what Quick Play uses). Best run per player / team; days are UTC. Also in the game: main menu &gt; Leaderboard.</div>
+  </section>
   <p class="credit">Zumbi Blocks by Adrian (AdrianKS) &mdash; <a href="https://store.steampowered.com/app/1941780/Zumbi_Blocks_2_Open_Alpha/" target="_blank" rel="noopener">play Zumbi Blocks 2 on Steam</a></p>
   <p class="small">Unofficial web revival of the original 2013 game, hosted with the author's permission.</p>
-  <p class="small">Privacy: online play uses a direct browser-to-browser connection (WebRTC) between you and the host when it can, so the host's browser can see your IP address and you can see theirs. Add <code>?p2p=0</code> to the address to turn it off (everything then goes through the relay server).</p>
+  <p class="small">Privacy: online play uses a direct browser-to-browser connection (WebRTC) between you and the host when it can, so the host's browser can see your IP address and you can see theirs. Add <code>?p2p=0</code> to the address to turn it off (everything then goes through the relay server).
+    Your nickname, wave and kills are shown publicly on the leaderboard when you finish a match with the default rules. Visits are counted with Cloudflare Web Analytics (cookieless, no personal data, no tracking across sites).</p>
 
   <script>
+    // Leaderboard panel (phase 5, docs/LEADERBOARD.md): GET /api/leaderboard (cached for about a minute), refreshed every 60 s while the page is visible.
+    (function () {
+      var sel = { mode: "solo", period: "all", metric: "wave" }, data = null;
+      document.querySelectorAll("#lb .seg").forEach(function (seg) {
+        seg.addEventListener("click", function (e) {
+          var b = e.target.closest("button"); if (!b) return;
+          sel[seg.dataset.k] = b.dataset.v;
+          seg.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+          render();
+        });
+      });
+      function cell(tr, text, cls) { var td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); }
+      function render() {
+        var body = document.querySelector("#lb-rows");
+        document.querySelector("#lb-who").textContent = sel.mode === "team" ? "Team" : "Player";
+        body.textContent = "";
+        if (!data) { var tr0 = document.createElement("tr"); cell(tr0, "Could not load the leaderboard.", "empty"); tr0.firstChild.colSpan = 5; body.appendChild(tr0); return; }
+        var b = data.boards.filter(function (x) { return x.id === sel.mode + "." + sel.period + "." + sel.metric; })[0];
+        var rows = b ? b.rows : [];
+        if (!rows.length) { var tr1 = document.createElement("tr"); cell(tr1, sel.period === "today" ? "Nobody yet today. Be the first!" : "Nobody yet. Be the first!", "empty"); tr1.firstChild.colSpan = 5; body.appendChild(tr1); return; }
+        rows.forEach(function (r, i) {
+          var tr = document.createElement("tr"); if (i < 3) tr.className = "top";
+          cell(tr, (i + 1) + ".", "r"); cell(tr, r.n, "who"); cell(tr, r.w, "n"); cell(tr, r.k, "n"); cell(tr, r.d, "n");
+          body.appendChild(tr);
+        });
+      }
+      function load() {
+        fetch("/api/leaderboard").then(function (r) { return r.ok ? r.json() : null; }).then(function (j) { if (j && j.boards) data = j; render(); }, function () { render(); });
+      }
+      window.zbLeaderboardReload = load;
+      load();
+      setInterval(function () { if (document.visibilityState === "visible") load(); }, 60000);
+    })();
+    // Cloudflare Web Analytics (cookieless page views, site zumbi-blocks-classic.vitosenic.com). Not for local runs or automated browsers (tests).
+    if (!/^(localhost|127\.|\[::1\])/.test(location.hostname) && !navigator.webdriver) {
+      var cfb = document.createElement("script");
+      cfb.defer = true; cfb.src = "https://static.cloudflareinsights.com/beacon.min.js";
+      cfb.setAttribute("data-cf-beacon", '{"token": "7438f7e2e4594fa59e01d93871366fbb"}');
+      document.head.appendChild(cfb);
+    }
     var canvas = document.querySelector("#unity-canvas");
     // Invite link bar: Unity calls zbSetRoom(code, hosting) when it joins / leaves a room (ZbSetRoomUi in ZbNet.jslib).
     // The copy runs from a real click on this DOM button: the clipboard API is unreliable from inside the game canvas.

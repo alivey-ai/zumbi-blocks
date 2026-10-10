@@ -97,6 +97,7 @@ Client to relay:
 | 11 | STATE (v2) | compact position update, see "State messages" |
 | 16 | META (phase 3, host only) | `u16 wave, u8 flags (1 started, 2 ended), u8 alive, [u8 countdown]`: feeds the server list and the Quick Play auto start. 5 or 6 bytes, anything else is ignored. Ops 12-15 are reserved (phase 1/2). |
 | 17 | VIS (phase 4, protocol 3) | `u8 visible, u8 fps, u16 rtt`: written by the page itself (jslib) on `visibilitychange`, as a complete frame, because the game does not run in a hidden tab. 18 `C_SNAP` and 19 `C_ADOPTED` stay reserved for host migration level C (not built). |
+| 20 | SCORE (phase 5, host only) | `u8 rules (1 Timed waves, 2 More loot), u16 wave, u8 n, n x (u16 kills, str8 name)`: every player's kills for the leaderboard; sent on each new wave, every 15 s and when the match ends (before the META that ends it). Kept in memory, recorded once per match, see docs/LEADERBOARD.md. |
 
 Relay to client:
 
@@ -118,6 +119,7 @@ Relay to client:
 | 0x8e | SEQ (phase 4) | `u32 seq`: newest buffered entry in this frame / replay; appended at the end of every frame that carries buffered entries to a protocol 3 peer. The client keeps the last one it processed (what a resume continues from). |
 | 0x8f | HOST_STATE (phase 4) | `u8 state (0 ok, 1 host connection lost, 2 host tab hidden, 3 host left: new match being set up), u8 secondsLeft`. 0x90-0x94 are reserved (host change / snapshot / roster of level C), unused. |
 | 0x95 | COUNTDOWN (phase 3) | `u8 seconds` left until the Quick Play room starts by itself (0 = cancelled / started). Sent to everybody except the host, once a second while the countdown runs. 0x8E-0x94 are reserved (phase 4). |
+| 0x96 | RESULT (phase 5) | `u8 board (0 solo, 1 team, 255 not ranked), u16 rankToday, u16 rankAllTime` (best-wave board): sent to everybody still connected once the relay recorded the match. |
 
 `str8` = `u8 length` + utf8. `args` = `u8 count`, then per argument `u8 tag` + value: 0 null, 1 `i32`, 2 `f32`, 3 `u8` bool, 4 string (`u16 length` + utf8), 5 Vector3 (3 x f32), 6 Quaternion (4 x f32), 7 int[] (`u16 count` + i32s). The relay never looks inside `args`.
 

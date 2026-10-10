@@ -3,6 +3,7 @@
 //   state 30  nickname prompt (first multiplayer use)        state 31  Quick Play "finding a game"
 //   state 32  invite link (?room=CODE)                       state 33  all settings (FOV, quality, invert Y, sensitivity, volume)
 //   state 34  host left, the group continues in a new match (phase 4, level B)
+//   state 35  leaderboard (phase 5, ZbBoard.cs)                state 36  start single player (after the nickname prompt)
 // Gameplay is not touched: Quick Play rooms may auto start (a countdown instead of ENTER), settings only change camera / quality / input sign.
 using System;
 using System.Collections;
@@ -73,7 +74,7 @@ public static class ZbSettings
 
 public static class ZbMenu
 {
-    public const int ST_NICK = 30, ST_QUICK = 31, ST_INVITE = 32, ST_SETTINGS = 33, ST_HOSTLEFT = 34;
+    public const int ST_NICK = 30, ST_QUICK = 31, ST_INVITE = 32, ST_SETTINGS = 33, ST_HOSTLEFT = 34, ST_SOLO = 36;
     const string QUICK_COMMENT = "Quick Play";
 
     // ---- small helpers -----------------------------------------------------------------------------------------
@@ -170,6 +171,8 @@ public static class ZbMenu
             case ST_INVITE: DrawInvite(g, cx); break;
             case ST_SETTINGS: DrawSettings(g, cx); break;
             case ST_HOSTLEFT: DrawHostLeft(g, cx); break;
+            case ZbBoard.ST_BOARD: ZbBoard.Draw(g, cx); break;
+            case ST_SOLO: StartSolo(g); break;
         }
     }
 
@@ -178,7 +181,7 @@ public static class ZbMenu
     static void DrawNick(sc_gamecontrol g, int cx)
     {
         Frame(g);
-        Msg(g, cx, -150, "Choose a nickname (shown to other players)", Color.yellow);
+        Msg(g, cx, -150, "Choose a nickname (shown to other players and on the leaderboard)", Color.yellow);
         Slot(g, cx, -100);
         nickText = FilterNick(GUI.TextField(new Rect(cx - 190, Screen.height / 2 - 95, 380f, 30f), nickText, 10));
         if (nickErr.Length > 0) Msg(g, cx, -50, nickErr, Color.red);
@@ -194,6 +197,24 @@ public static class ZbMenu
             }
         }
         if (Btn(g, cx, 50, "Go back")) g.gamestate = 0;
+    }
+
+    // ---- single player (phase 5): "Play alone" asks for the nickname first too (it is shown on the leaderboard) ----------------
+    // sc_gamecontrol state 24: true = the prompt was opened instead of starting the match
+    public static bool SoloNick(sc_gamecontrol g)
+    {
+        if (!NeedNick(g)) return false;
+        nickReturn = ST_SOLO; nickText = ""; nickErr = ""; g.gamestate = ST_NICK;
+        return true;
+    }
+    // what the original "Play alone" button does
+    static void StartSolo(sc_gamecontrol g)
+    {
+        g.iamserver = true;
+        Network.InitializeSecurity();
+        Network.InitializeServer(1, 50123, false);
+        g.gamestate = 3;
+        SceneManager.LoadScene(1);
     }
 
     // ---- main menu row -----------------------------------------------------------------------------------------
@@ -665,6 +686,7 @@ public static class ZbMenu
         if (g.gamestate == 0) needClick = false;
         if (claiming && ZbNet.Connected) claiming = false;
 
+        ZbBoard.Tick(g); // phase 5: match results (before HostTick: the last C_SCORE goes out before the C_META that ends the match)
         HostTick(g);
     }
 
@@ -788,7 +810,7 @@ public static class ZbMenu
         list += "]";
         return "{\"gamestate\":" + (g != null ? g.gamestate : -99) + ",\"countdown\":" + cd + ",\"quickHosting\":" + (quickHosting ? 1 : 0) + ",\"needClick\":" + (needClick ? 1 : 0) + ",\"overlay\":" + (overlay ? 1 : 0)
             + ",\"net\":{\"reconnecting\":" + (ZbNet.reconnecting ? 1 : 0) + ",\"hostState\":" + ZbNet.hostState + ",\"seq\":" + ZbNet.LastSeq + ",\"sent\":" + ZbNet.SentBuffered + ",\"epoch\":" + ZbNet.Epoch + ",\"grace\":" + ZbNet.GraceSec + ",\"attempts\":" + ZbNet.Attempts + ",\"claiming\":" + (claiming ? 1 : 0) + ",\"leftStatus\":\"" + leftStatus.Replace("\"", "") + "\",\"leftMoney\":" + leftMoney + "}"
-            + ",\"started\":" + (mc != null && mc.gamestarted ? 1 : 0) + ",\"deffov\":" + deffov + ",\"inviteErr\":\"" + inviteErr.Replace("\"", "") + "\",\"nick\":\"" + (g != null ? g.playernick : "") + "\",\"list\":" + list + "}";
+            + ",\"started\":" + (mc != null && mc.gamestarted ? 1 : 0) + ",\"deffov\":" + deffov + ",\"inviteErr\":\"" + inviteErr.Replace("\"", "") + "\",\"nick\":\"" + (g != null ? g.playernick : "") + "\",\"list\":" + list + ",\"board\":" + ZbBoard.DebugJson() + "}";
     }
     // test hooks (NetRunner.Debug*)
     public static void DebugSkipNick() { PlayerPrefs.SetInt("ZBX_nick_ok", 1); PlayerPrefs.Save(); }

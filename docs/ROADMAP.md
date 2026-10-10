@@ -49,9 +49,12 @@ Make online play feel smooth without changing the network architecture.
 - [x] **Zombies per wave scale with the players** (Timed only): x1 / x1.5 / x2 / x2.5 for 1-4 players, cap on zombies alive up to 80 (60 fps measured at 105 in headless Chrome).
 
 ## Phase 5 — Community
-- Leaderboards (Cloudflare D1): best wave solo / with friends, kills; daily and all-time.
+- [x] **Leaderboards** (Cloudflare D1, see docs/LEADERBOARD.md): best wave and most kills, Solo / Team, today (UTC) and all time; main menu > Leaderboard, a panel on the web page, the rank on the end-of-match screen. Multiplayer is recorded by the relay, single player with a signed start token + plausibility checks; default rules only.
+- [x] **Game counts** per day in D1 (matches started / finished, player slots), unlisted `/api/stats`.
+- [x] **Visitor analytics**: Cloudflare Web Analytics (cookieless), privacy note on the page.
+- [x] Custom domain (zumbi-blocks-classic.vitosenic.com).
 - Personal stats saved per browser.
-- Custom domain, Discord server, privacy-friendly analytics (Cloudflare Web Analytics) to see how many people play.
+- Discord server.
 - Gamepad support; maybe touch controls for tablets.
 
 ## Phase 6 — Official & distribution (with Adrian)
