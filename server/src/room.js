@@ -819,7 +819,7 @@ export class Room extends DurableObject {
   lobbyUpdate() {
     const m = this.meta;
     if (!m) return;
-    if (!m.listed) { this.lobby().remove(m.code).catch(() => {}); return; }
+    if (!m.listed || m.restart) { this.lobby().remove(m.code).catch(() => {}); return; } // a room waiting for a new host is not offered to anybody
     this.lobby().upsert({
       code: m.code, name: m.name, players: m.restart ? 0 : this.players.size + this.limbo.size, max: m.max, type: m.type, pw: !!m.pw, comment: m.comment,
       wave: m.wave || 0, started: !!m.started, ended: !!m.ended, created: m.created, colo: m.colo || "", country: m.country || "",
