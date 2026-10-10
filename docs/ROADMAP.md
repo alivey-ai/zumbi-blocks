@@ -37,6 +37,7 @@ Make online play feel smooth without changing the network architecture.
 - [x] **Reconnect** after a short drop (keep your player for 20 s, host 15 s): resume token, limbo slot, seq replay, count based resend, WebRTC lane comes back. Intentional leave / tab close skips the grace.
 - [x] **Host leaves, level A** (approved): players keep the money of the match, clean "host left" screen.
 - [x] **Host leaves, level B "claim restart"**: a remaining player takes over the same room code and the group continues in a new match (wave 1) without the menu.
+- [x] **Host leaves, level B+ "continue"** (after playtests): the claimed match continues at the wave the old one was on, with the old room's rules; every player gets its own items, health, revives and kills back. Lost: zombies alive, ground loot, constructions, vehicles.
 - [ ] **Host migration level C** (state preserving, mid-match): NOT built, see "Why not level C" in MULTIPLAYER.md.
 - [x] **Hidden host tab**: host's tab title blinks a warning, clients see "host paused" instead of a silent freeze, hidden tabs are never dropped. Spike: a hidden tab cannot be reproduced with Playwright (see MULTIPLAYER.md), numbers still to be taken by hand in a real browser.
 - [x] Rate and message size limits against griefing (first layer; RPC / INST content validators in shadow mode are not done).

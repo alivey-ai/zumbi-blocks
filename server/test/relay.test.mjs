@@ -569,6 +569,7 @@ await test("p4: host leaves for good (clean close) with protocol 3 players -> cl
   h.ws.close(1000, "bye");
   for (const c of [a.c, b.c]) { const hs = await c.take(0x8f); assert.equal(hs[1], 3); assert.equal((await c.take(0x87))[1], 4); }
   const i1 = await info(code); assert.equal(i1.exists, true); assert.equal(i1.hostState, "restarting"); assert.equal(i1.restart.successor, 2); assert.equal(i1.restart.claimOpen, false); assert.equal(i1.epoch, 1);
+  assert.equal(i1.restart.wave, 4, "level B+: the last wave of the started match is kept for the successor");
   const nj = new Client(`/ws/room/${code}?v=3`); await nj.opened; assert.equal((await nj.take(0x87))[1], 9);
   // the other player may not claim during the successor's head start
   const early = new Client(`/ws/host?v=3&claim=${code}.1.${a.tok}`); await early.opened; assert.equal((await early.take(0x87))[1], 9);
@@ -589,6 +590,7 @@ await test("p4: successor does not claim -> after the head start any remaining p
   const a = await join3(code); await h.take(0x85); const b = await join3(code); await h.take(0x85);
   h.ws.close(1000, "bye"); await a.c.take(0x87); await b.c.take(0x87);
   const i1 = await info(code); const other = i1.restart.successor === 1 ? { id: 2, tok: b.tok } : { id: 1, tok: a.tok };
+  assert.equal(i1.restart.wave, 0, "no started match, no wave");
   await sleep(1700);
   assert.equal((await info(code)).restart.claimOpen, true);
   const nh = new Client(`/ws/host?v=3&claim=${code}.${other.id}.${other.tok}`); await nh.opened; assert.equal(parseWelcome(await nh.take(0x81)).id, 0);

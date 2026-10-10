@@ -23,6 +23,7 @@ Phase 4 / playtest tests (all need the local Worker started with `npx wrangler d
 - `mobile.mjs` desktop-only gate (iPhone / Android / iPad / tablet UAs, invite link, narrow desktop, `?desktop=1`).
 - `reconnect.mjs` kills the client's / host's WebSocket mid game (same id, money, lane), then a 26 s offline outage (back to the menu).
 - `host.mjs` host leaves: Disconnect with money (level A), tab close, dead connection beyond the grace, successor opts out, nobody left; claim restart (level B).
+- `hostplus.mjs` host leaves, level B+: the claimed match continues at the old wave (zombie count / life, timer, time, kills) with every player's items, health and kills; Classic rules carried over after a tab close.
 - `hidden.mjs` hidden host tab (visibility is simulated: Playwright cannot background a page).
 - `playtest.mjs` timed waves vs Classic, HUD wave value, teammates' health.
 Room names typed in the create screen are cut at 10 characters.

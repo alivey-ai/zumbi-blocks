@@ -88,6 +88,7 @@ New logic: `ZbNetSession.cs` (resume), `ZbTeam.cs` (teammates' health), `ZbMenu.
 - `sc_gamecontrol.OnGUI` state 25: `ZbMenu.WavesToggle(this, num7)` replaces the NAT toggle (ignored in this port).
 - `sc_matchcontroller` (wave timer): `ZbMenu.TimedWaves()` arms the 120 s timer for every wave; `matchdata.waveleft` is set from it.
 - `sc_matchdata`: field `waveleft`, RPCs `syncwavetimer` and `synchealth` (-> `ZbTeam.Set`), `syncwavetimer` is sent next to `sendstuff`; `OnGUI` draws "Wave N" before the clock and "Next wave in m:ss" below it.
+- Level B+ (`ZbCarry.cs`): `sc_spawner` calls `ZbCarry.OnSpawn(this, player)` right after `playerobj = val5` and has the RPC `zbkills(int)`; `sc_matchdata` has the RPC `zbroom(int)` (-> `ZbCarry.OnRoom`).
 
 ## Particle effects (checked 2026-10-09)
 The backlog said `muzle rifle`, `Rflare_out` and `shotRPG` used Unity 4 legacy particles (Ellipsoid/Mesh Particle Emitter, Particle Animator, Particle Renderer) that Unity 6 removed. **That was wrong.**
