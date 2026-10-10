@@ -439,5 +439,211 @@ await test("limits: a flood of tiny messages is dropped, then the socket is clos
   [h, b].forEach((x) => x.close());
 });
 
+
+// ---- phase 4 steps 3-5: protocol 3 (resume, limbo, host states, claim restart) --------------------------------------------------------
+// the test knobs grace=, tstale=, tclaim= exist only with `wrangler dev --var ZB_TEST:1`
+const td = new TextDecoder();
+function parseWelcome(m) {
+  const d = dv(m); const cl = m[7]; const o = 8 + cl;
+  const out = { id: d.getInt32(1, true), isHost: m[5], max: m[6], code: td.decode(m.subarray(8, o)), ext: null, len: m.length };
+  if (m.length > o) { const tl = m[o]; const tok = td.decode(m.subarray(o + 1, o + 1 + tl)); const p = o + 1 + tl;
+    out.ext = { tok, grace: m[p], epoch: m[p + 1], flags: m[p + 2], hostId: d.getInt32(p + 3, true), accepted: d.getUint32(p + 7, true) }; }
+  return out;
+}
+async function host3(extra = "") {
+  const h = new Client(`/ws/host?v=3&name=P4${extra.includes("max=") ? "" : "&max=4"}&grace=2&tstale=2500&tclaim=1500${extra}`); await h.opened;
+  const w = parseWelcome(await h.take(0x81));
+  return { h, code: w.code, w, tok: w.ext.tok };
+}
+async function join3(code, extra = "") { const c = new Client(`/ws/room/${code}?v=3${extra}`); await c.opened; const w = parseWelcome(await c.take(0x81)); return { c, w, tok: w.ext && w.ext.tok }; }
+async function resume3(code, id, tok, seq, extra = "") { const c = new Client(`/ws/room/${code}?v=3&rejoin=${id}.${tok}&seq=${seq}${extra}`); await c.opened; return c; }
+const seqOf = (m) => dv(m).getUint32(1, true);
+const info = async (code) => (await fetch(`http://${BASE}/api/room/${code}`)).json();
+const vis = (v) => new Uint8Array([17, v ? 1 : 0, 60, 0, 0]);
+async function drain(c, ms = 300) { await sleep(ms); const l = c.msgs.splice(0); return l; }
+
+await test("p4: protocol 3 welcome carries token / grace / epoch; protocol 2 welcome is unchanged", async () => {
+  const { h, code, w } = await host3();
+  assert.equal(w.ext.grace, 2); assert.equal(w.ext.flags, 0); assert.equal(w.ext.tok.length, 32); assert.equal(w.ext.hostId, 0);
+  const a = await join3(code); assert.equal(a.w.id, 1); assert.equal(a.w.ext.tok.length, 32); assert.notEqual(a.tok, w.ext.tok);
+  const v2 = await join(code); const w2 = await v2.take(0x81); assert.equal(w2.length, 8 + w2[7], "v2 welcome has no extension");
+  const hd = await host(); const d = await hd.h.take.call(hd.h, 0x8e, 200).catch(() => null); assert.equal(d, null);
+  [h, a.c, v2, hd.h].forEach((x) => x.close());
+});
+
+await test("p4: client socket dies -> slot kept, host not told, resume replays only what was missed (not own entries), token rotates", async () => {
+  const { h, code } = await host3(); await h.take(0x81).catch(() => {});
+  const a = await join3(code); await h.take(0x85); await a.c.take(0x8a);
+  const A = view(0, 1), B = view(0, 2), C = view(1, 1);
+  h.send(inst(A, 3)); await a.c.take(0x83); const s1 = seqOf(await a.c.take(0x8e));
+  a.c.send(inst(C, 4)); await h.take(0x83); // a's own buffered op
+  a.c.send(rpc(5, C, "own_rpc")); await h.take(0x82);
+  a.c.ws.terminate(); await sleep(400);
+  await h.none(0x86, 300);                     // host is not told
+  h.send(rpc(5, A, "missed_rpc")); h.send(inst(B, 5)); await sleep(150);
+  const c2 = await resume3(code, 1, a.tok, s1);
+  const w = parseWelcome(await c2.take(0x81));
+  assert.equal(w.id, 1); assert.equal(w.ext.flags & 1, 1); assert.notEqual(w.ext.tok, a.tok); assert.equal(w.ext.accepted, 2, "relay parsed 2 buffered ops from this player");
+  const m1 = await c2.take(0x82); assert.equal(td.decode(m1.subarray(15, 15 + m1[14])), "missed_rpc");
+  const m2 = await c2.take(0x83); assert.equal(dv(m2).getInt32(1, true), 0);
+  assert.ok(seqOf(await c2.take(0x8e)) > s1); await c2.take(0x8a);
+  await c2.none(0x83, 200); // no replay of A (already had it) nor of its own C
+  assert.equal(h.count(0x85), 0); await h.none(0x85, 100);
+  const again = await resume3(code, 1, a.tok, s1); assert.equal((await again.take(0x87))[1], 10, "old token is dead");
+  // the resumed socket works both ways
+  h.send(rpc(1, SCENE(9), "live")); await c2.take(0x82); c2.send(rpc(0, SCENE(9), "toserver")); await h.take(0x82);
+  [h, c2].forEach((x) => x.close());
+});
+
+await test("p4: an object destroyed while the client was away is destroyed on resume (tombstone)", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85); await a.c.take(0x8a);
+  const A = view(0, 7);
+  h.send(inst(A, 3)); await a.c.take(0x83); const s = seqOf(await a.c.take(0x8e));
+  a.c.ws.terminate(); await sleep(300);
+  h.send(rpc(5, A, "killmebuffered")); await sleep(100);
+  const c2 = await resume3(code, 1, a.tok, s); await c2.take(0x81);
+  const d = await c2.take(0x84); assert.equal(readViewT(d, 1), A);
+  await c2.take(0x8a);
+  [h, c2].forEach((x) => x.close());
+});
+function readViewT(b, o) { const d = dv(b); return d.getUint32(o + 4, true) * 4294967296 + d.getUint32(o, true); }
+
+await test("p4: grace over -> player dropped for real (host told once), resume refused; limbo counts toward capacity until then", async () => {
+  const { h, code } = await host3("&max=3");
+  const a = await join3(code); await h.take(0x85); const b = await join3(code); await h.take(0x85);
+  a.c.ws.terminate(); await sleep(300);
+  const full = new Client(`/ws/room/${code}?v=3`); await full.opened; assert.equal((await full.take(0x87))[1], 3, "limbo slot is reserved");
+  assert.equal((await info(code)).players, 3);
+  await sleep(2600);
+  const dis = await h.take(0x86, 1500); assert.equal(dv(dis).getInt32(1, true), 1); assert.equal(h.count(0x86), 0);
+  const late = await resume3(code, 1, a.tok, 0); assert.equal((await late.take(0x87))[1], 10);
+  assert.equal((await info(code)).players, 2);
+  const fresh = await join3(code); assert.equal(fresh.w.id, 3, "ids are never reused");
+  [h, b.c, fresh.c].forEach((x) => x.close());
+});
+
+await test("p4: intentional leave (close 1000 / 1001) skips limbo", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85);
+  a.c.ws.close(1000, "bye"); const dis = await h.take(0x86, 1000); assert.equal(dv(dis).getInt32(1, true), 1);
+  const b = await join3(code); await h.take(0x85); b.c.ws.close(1001, "going away"); await h.take(0x86, 1000);
+  h.close();
+});
+
+await test("p4: v2 sockets keep today's behaviour (no grace; v2 host leaving closes the room)", async () => {
+  const { h, code } = await host();
+  const c = await join(code); await c.take(0x8a); await h.take(0x85);
+  c.ws.terminate(); const dis = await h.take(0x86, 1000); assert.equal(dv(dis).getInt32(1, true), 1);
+  const d = await join(code); await d.take(0x8a);
+  h.ws.terminate(); assert.equal((await d.take(0x87, 2000))[1], 4);
+  assert.equal((await info(code)).exists, false);
+  d.close();
+});
+
+await test("p4: host socket dies -> clients see 'away', joins are refused (9), requests to the host are queued and delivered on resume", async () => {
+  const { h, code, tok } = await host3();
+  const a = await join3(code); await h.take(0x85); await a.c.take(0x8a);
+  const b = await join3(code); await h.take(0x85); await b.c.take(0x8a);
+  h.ws.terminate(); await sleep(300);
+  const hs = await a.c.take(0x8f); assert.equal(hs[1], 1); assert.equal(hs[2], 2);
+  assert.equal((await info(code)).hostState, "away");
+  const j = new Client(`/ws/room/${code}?v=3`); await j.opened; assert.equal((await j.take(0x87))[1], 9);
+  a.c.send(rpc(0, SCENE(3), "toServer1")); b.c.send(rpc(0, SCENE(3), "toServer2"));
+  b.c.ws.close(1000, "bye"); await sleep(200);
+  const h2 = await resume3(code, 0, tok, 0);
+  const w = parseWelcome(await h2.take(0x81)); assert.equal(w.id, 0); assert.equal(w.isHost, 1);
+  const got = []; for (let i = 0; i < 3; i++) got.push((await h2.take(i < 2 ? 0x82 : 0x86)));
+  assert.ok(await a.c.take(0x8f)); // back to ok
+  assert.equal((await info(code)).hostState, "ok");
+  const j2 = await join3(code); assert.ok(j2.w.id >= 3);
+  h2.send(rpc(1, SCENE(4), "afterwards")); await a.c.take(0x82);
+  [h2, a.c, j2.c].forEach((x) => x.close());
+});
+
+await test("p4: host leaves for good (clean close) with protocol 3 players -> claim restart: successor claims the code, others rejoin a fresh match", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85); const b = await join3(code); await h.take(0x85);
+  a.c.send(new Uint8Array([7, 0, 0, 0, 0, 90, 0])); b.c.send(new Uint8Array([7, 0, 0, 0, 0, 20, 0])); await sleep(200); // b has the lower rtt
+  h.send(listing(true, "Restart Me")); h.send(new Uint8Array([16, 4, 0, 1, 2])); await sleep(200);
+  h.ws.close(1000, "bye");
+  for (const c of [a.c, b.c]) { const hs = await c.take(0x8f); assert.equal(hs[1], 3); assert.equal((await c.take(0x87))[1], 4); }
+  const i1 = await info(code); assert.equal(i1.exists, true); assert.equal(i1.hostState, "restarting"); assert.equal(i1.restart.successor, 2); assert.equal(i1.restart.claimOpen, false); assert.equal(i1.epoch, 1);
+  const nj = new Client(`/ws/room/${code}?v=3`); await nj.opened; assert.equal((await nj.take(0x87))[1], 9);
+  // the other player may not claim during the successor's head start
+  const early = new Client(`/ws/host?v=3&claim=${code}.1.${a.tok}`); await early.opened; assert.equal((await early.take(0x87))[1], 9);
+  const bad = new Client(`/ws/host?v=3&claim=${code}.2.nottoken`); await bad.opened; assert.equal((await bad.take(0x87))[1], 10);
+  // the successor claims
+  const nh = new Client(`/ws/host?v=3&claim=${code}.2.${b.tok}`); await nh.opened;
+  const w = parseWelcome(await nh.take(0x81)); assert.equal(w.id, 0); assert.equal(w.isHost, 1); assert.equal(w.ext.flags & 2, 2); assert.equal(w.code, code); assert.equal(w.ext.epoch, 1);
+  const i2 = await info(code); assert.equal(i2.hostState, "ok"); assert.equal(i2.epoch, 1); assert.equal(i2.name, "Restart Me"); assert.equal(i2.started, false); assert.equal(i2.wave, 0);
+  const late = new Client(`/ws/host?v=3&claim=${code}.1.${a.tok}`); await late.opened; assert.equal((await late.take(0x87))[1], 8, "already claimed");
+  const rooms = await (await fetch(`http://${BASE}/api/rooms`)).json(); assert.ok(rooms.find((r) => r.code === code), "stays listed");
+  const again = await join3(code); assert.equal(again.w.id, 1, "ids start again"); await nh.take(0x85);
+  const r = await resume3(code, 1, a.tok, 0); assert.equal((await r.take(0x87))[1], 10, "old match tokens are dead");
+  [nh, again.c].forEach((x) => x.close());
+});
+
+await test("p4: successor does not claim -> after the head start any remaining player may; nobody claims -> room closes; a lone host leaving closes at once", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85); const b = await join3(code); await h.take(0x85);
+  h.ws.close(1000, "bye"); await a.c.take(0x87); await b.c.take(0x87);
+  const i1 = await info(code); const other = i1.restart.successor === 1 ? { id: 2, tok: b.tok } : { id: 1, tok: a.tok };
+  await sleep(1700);
+  assert.equal((await info(code)).restart.claimOpen, true);
+  const nh = new Client(`/ws/host?v=3&claim=${code}.${other.id}.${other.tok}`); await nh.opened; assert.equal(parseWelcome(await nh.take(0x81)).id, 0);
+  nh.close(); await sleep(200);
+  const { h: lone, code: c2 } = await host3(); lone.ws.close(1000, "bye"); await sleep(300);
+  assert.equal((await info(c2)).exists, false);
+});
+
+await test("p4: host socket dies and does not come back -> grace over -> claim restart", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85); await a.c.take(0x8a);
+  h.ws.terminate();
+  await a.c.take(0x8f);                              // away
+  const hs = await a.c.take(0x8f, 4500); assert.equal(hs[1], 3);
+  assert.equal((await a.c.take(0x87))[1], 4);
+  assert.equal((await info(code)).hostState, "restarting");
+  const nh = new Client(`/ws/host?v=3&claim=${code}.1.${a.tok}`); await nh.opened; assert.equal(parseWelcome(await nh.take(0x81)).id, 0); nh.close();
+});
+
+await test("p4: hidden host tab is announced (S_HOST_STATE hidden), hidden tabs are never limboed for silence, visible silent ones are", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85); await a.c.take(0x8a);
+  const b = await join3(code); await h.take(0x85); await b.c.take(0x8a);
+  h.send(vis(false)); const s1 = await a.c.take(0x8f); assert.equal(s1[1], 2); await b.c.take(0x8f);
+  assert.equal((await info(code)).hostState, "hidden");
+  const late = await join3(code); assert.equal((await late.c.take(0x8f))[1], 2, "late joiner learns it too");
+  h.send(vis(true)); assert.equal((await a.c.take(0x8f))[1], 0);
+  // a is hidden and silent, b is visible and silent; the host keeps sending so the relay sweeps
+  a.c.send(vis(false)); await sleep(100);
+  for (let i = 0; i < 12; i++) { h.send(new Uint8Array([7, 0, 0, 0, 0, 0, 0])); await sleep(250); }
+  await h.none(0x86, 100);
+  const rb = await resume3(code, 2, b.tok, 0); // b was silent while visible: in limbo, resumable (its old socket was closed by the relay)
+  assert.equal(parseWelcome(await rb.take(0x81)).ext.flags & 1, 1);
+  assert.ok(!a.c.closed, "hidden a stays connected");
+  [h, a.c, rb, late.c].forEach((x) => x.close());
+});
+
+await test("p4: resume with an unknown seq (newer than the relay has) or a nonsense token is refused", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85);
+  a.c.ws.terminate(); await sleep(200);
+  const bad = await resume3(code, 1, a.tok, 999999); assert.equal((await bad.take(0x87))[1], 10);
+  const junk = new Client(`/ws/room/${code}?v=3&rejoin=zzz`); await junk.opened; assert.equal((await junk.take(0x87))[1], 10);
+  const ok = await resume3(code, 1, a.tok, 0); assert.equal(parseWelcome(await ok.take(0x81)).ext.flags & 1, 1);
+  [h, ok].forEach((x) => x.close());
+});
+
+await test("p4: a reloaded tab frees its old limbo slot with stale=ID.TOKEN", async () => {
+  const { h, code } = await host3("&max=2");
+  const a = await join3(code); await h.take(0x85);
+  a.c.ws.terminate(); await sleep(300);
+  const blocked = new Client(`/ws/room/${code}?v=3`); await blocked.opened; assert.equal((await blocked.take(0x87))[1], 3);
+  const n = await join3(code, `&stale=1.${a.tok}`); assert.ok(n.w.id > 1);
+  [h, n.c].forEach((x) => x.close());
+});
+
 console.log(`${ok} tests passed`);
 process.exit(process.exitCode || 0);

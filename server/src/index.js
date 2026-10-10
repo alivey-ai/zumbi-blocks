@@ -107,6 +107,12 @@ export default {
         return stub.fetch(new Request(u, request));
       };
       if (path === "/ws/host") {
+        const claim = url.searchParams.get("claim"); // "CODE.ID.TOKEN": a remaining player takes over the room after the host left (phase 4, level B)
+        if (claim) {
+          const ccode = claim.split(".")[0].toUpperCase();
+          if (!CODE_RE.test(ccode)) return new Response("Bad room code", { status: 400 });
+          return fwd(ccode, true);
+        }
         for (let i = 0; i < 6; i++) {
           const res = await fwd(newCode(), true);
           if (res.status !== 409) return res;
