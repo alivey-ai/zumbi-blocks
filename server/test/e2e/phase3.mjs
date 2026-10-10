@@ -101,7 +101,8 @@ await until(async () => (await rooms()).length === 0, 15000);
 const G = await game(b, "G", new URL("/?room=" + code, BASE).href);
 await G.waitForTimeout(1500); await nickIfAsked(G); await G.waitForTimeout(1500);
 m = await G.menu();
-check("invite to a room whose host left: not found / closed", m && m.gamestate === 32 && /not found|closed/i.test(m.inviteErr), J(m));
+// phase 4: a remaining player takes the room over when the host leaves, so the link keeps working; a room that really is gone is the unknown-room check above
+check("invite to a room whose host left: the room was taken over (phase 4) and the link joins it, or it is reported closed", m && ((m.gamestate === 5 || m.gamestate === 6) || (m.gamestate === 32 && /not found|closed/i.test(m.inviteErr))), J(m));
 
 // ---------------------------------------------------------------- settings: FOV, graphics, invert Y; persist across a reload
 const S = await game(b, "S", BASE);

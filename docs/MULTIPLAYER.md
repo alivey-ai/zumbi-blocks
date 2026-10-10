@@ -71,11 +71,11 @@ The relay compacts the buffer so it does not grow forever (the original relied o
 * `DestroyPlayerObjects(p)` destroys every live object owned by `p` on all peers and removes their history;
 * `RemoveRPCs(p)` removes buffered RPCs sent by `p`.
 
-## Wire protocol (version 2)
+## Wire protocol (version 3; version 2 sockets are still accepted and behave exactly as before phase 4)
 
 One binary WebSocket per player. All integers little endian. A WebSocket message is a *frame*: a sequence of messages, each `u16 length` + body (`body[0]` is the opcode). The client sends everything produced in one game frame as one WebSocket message (split below 60 KB); the relay answers per recipient the same way.
 
-Connect URLs (query values URL-encoded, `v` must equal the protocol version or the relay rejects with reason 7; version 2 added the messages marked below, a page from the version 1 era is refused instead of misbehaving):
+Connect URLs (query values URL-encoded, `v` must be 2 or 3 or the relay rejects with reason 7; phase 4 additions: `rejoin=ID.TOKEN&seq=N` (resume), `stale=ID.TOKEN` (free the slot a crashed tab left in limbo), `claim=CODE.ID.TOKEN` on `/ws/host` (claim restart); version 2 added the messages marked below, a page from the version 1 era is refused instead of misbehaving):
 
 * host: `GET /ws/host?v=2&max=16&name=NAME&pw=PASSWORD&type=TYPE` (the Worker picks an unused 5 char code, alphabet without I, O, 0, 1)
 * join: `GET /ws/room/CODE?v=2&pw=PASSWORD` (case insensitive)
@@ -95,25 +95,28 @@ Client to relay:
 | 9 | TIME (v2) | `u32 clockMs`: the sender's `performance.now()`, first message of every frame |
 | 10 | ECHO (v2) | `u8 type (0 ping, 1 pong), i32 target, u32 t`: end to end ping, clients may only target the host |
 | 11 | STATE (v2) | compact position update, see "State messages" |
-| 16 | META (phase 3, host only) | `u16 wave, u8 flags (1 started, 2 ended), u8 alive, [u8 countdown]`: feeds the server list and the Quick Play auto start. 5 or 6 bytes, anything else is ignored. Ops 12-15 are reserved (phase 1/2), 17-19 for phase 4 (`C_VIS`, `C_SNAP`, `C_ADOPTED`). |
+| 16 | META (phase 3, host only) | `u16 wave, u8 flags (1 started, 2 ended), u8 alive, [u8 countdown]`: feeds the server list and the Quick Play auto start. 5 or 6 bytes, anything else is ignored. Ops 12-15 are reserved (phase 1/2). |
+| 17 | VIS (phase 4, protocol 3) | `u8 visible, u8 fps, u16 rtt`: written by the page itself (jslib) on `visibilitychange`, as a complete frame, because the game does not run in a hidden tab. 18 `C_SNAP` and 19 `C_ADOPTED` stay reserved for host migration level C (not built). |
 
 Relay to client:
 
 | op | name | body after opcode |
 |---|---|---|
-| 0x81 | WELCOME | `i32 yourId, u8 isHost, u8 maxPlayers, str8 roomCode` |
+| 0x81 | WELCOME | `i32 yourId, u8 isHost, u8 maxPlayers, str8 roomCode`; protocol 3 appends `str8 token, u8 graceSec, u8 epoch, u8 flags (1 resumed, 2 restart claim), i32 hostId (always 0), u32 acceptedBufferedOps (0xffffffff unknown)` |
 | 0x82 | RPC | `i32 senderId` then the client RPC body (`mode, view, name, args`) |
 | 0x83 | INST | `i32 senderId` then the client INST body |
 | 0x84 | DESTROY | `i64 view` |
 | 0x85 | PLAYER_CONNECTED (host) | `i32 id, str8 anonymousIpId` |
 | 0x86 | PLAYER_DISCONNECTED (host) | `i32 id` |
-| 0x87 | REJECT | `u8 reason`: 1 room not found, 2 wrong password, 3 room full, 4 host left, 5 kicked, 6 rate limited, 7 protocol mismatch. The relay closes the socket after it. |
+| 0x87 | REJECT | `u8 reason`: 1 room not found, 2 wrong password, 3 room full, 4 host left, 5 kicked, 6 rate limited (retry later), 7 protocol mismatch, 8 someone else already claimed the room, 9 host away / restarting (retry), 10 resume refused (token unknown / grace over / bad seq). The relay closes the socket after it. |
 | 0x88 | PONG | `u32 clientTimeMs` |
 | 0x89 | PING_INFO (host) | `i32 id, u16 rttMs` |
 | 0x8A | SYNC_DONE | end of the buffered replay for a new joiner |
 | 0x8B | TIME (v2) | `i32 senderId, u32 clockMs`: first message of every frame that came from a peer's frame with a TIME message (not in buffer replays) |
 | 0x8C | ECHO (v2) | `i32 senderId, u8 type, u32 t` |
 | 0x8D | STATE (v2) | same body as the client's STATE message |
+| 0x8e | SEQ (phase 4) | `u32 seq`: newest buffered entry in this frame / replay; appended at the end of every frame that carries buffered entries to a protocol 3 peer. The client keeps the last one it processed (what a resume continues from). |
+| 0x8f | HOST_STATE (phase 4) | `u8 state (0 ok, 1 host connection lost, 2 host tab hidden, 3 host left: new match being set up), u8 secondsLeft`. 0x90-0x94 are reserved (host change / snapshot / roster of level C), unused. |
 | 0x95 | COUNTDOWN (phase 3) | `u8 seconds` left until the Quick Play room starts by itself (0 = cancelled / started). Sent to everybody except the host, once a second while the countdown runs. 0x8E-0x94 are reserved (phase 4). |
 
 `str8` = `u8 length` + utf8. `args` = `u8 count`, then per argument `u8 tag` + value: 0 null, 1 `i32`, 2 `f32`, 3 `u8` bool, 4 string (`u16 length` + utf8), 5 Vector3 (3 x f32), 6 Quaternion (4 x f32), 7 int[] (`u16 count` + i32s). The relay never looks inside `args`.
@@ -254,6 +257,35 @@ Everything here sits around the game: `game/Assets/Scripts/ZbMenu.cs` (new file)
 
 **Settings.** Main menu Options > "All settings" (state 33), and in game the pause panel (ESC) Options button, which did nothing in the original, opens the same rows as an overlay: Field of view 60-110 (default 70, applied to the local player's `def_fov` and the camera, zooming still narrows by the gun's `add_fov`), Sensitivity and Volume (the original values `ZB_<ver>_sense` / `_sound`, saved by the original `save()`), Graphics Low / Medium / High, Invert vertical look. New keys `ZBX_fov`, `ZBX_invy`, `ZBX_quality` (own keys, not wiped by a save version bump); every change calls `PlayerPrefs.Save()` (sliders: when the mouse is released). Graphics maps to the project's existing QualitySettings levels: Low = 1 "Fast", Medium = 3 "Good" (what the WebGL build uses, the default: an untouched profile never calls `QualitySettings`), High = 4 "Beautiful". Invert Y changes the single read of `Mouse Y` that aims (`sc_player`, `headang`). The existing autoaim / autoreload toggles stay on the original Controls screen.
 
+## Resilience (phase 4)
+
+Design: `docs/design/PHASE3-4-MATCHMAKING-RESILIENCE.md`. What shipped and how it differs from the design is listed here.
+
+### Limits (step 1)
+Per IP and per minute, all in memory or in the Lobby DO (nothing paid): `/api/rooms|room|quickplay` 240 (counted in the Worker isolate, so a refused request costs no Durable Object call), `/api/ping` 600 (an open server list probes up to 8 rows twice per 10 s, about 100 a minute per player), new rooms 20/min and 200/hour, first joins 90/min, rejoins 180/min (a Wi-Fi blip makes a whole NAT retry at once, so rejoins have their own bucket). A refused WebSocket upgrade is answered with a normal socket that carries `REJECT(6)` and closes (a browser cannot read the status of a failed upgrade); the client retries a resume that gets 6. Per socket: the byte bucket of before plus a message count bucket (host 3000/s, clients 600/s, burst 2 s; over budget the message is skipped, 100 in a row close the socket). Frame 64 KB, message 8 KB, 512 messages per frame, buffer caps unchanged. Not done: the RPC / INST content validators in shadow mode.
+
+### Desktop-only gate (step 2)
+The page template checks the user agent (Android / iPhone / iPad / Mobile ...), iPadOS (Mac user agent with touch points), `userAgentData.mobile` and `(pointer: coarse)` without any fine pointer; on a match it shows the message and never starts the 100 MB download. A narrow desktop window is not gated. `?desktop=1` skips the check. Test: `server/test/e2e/mobile.mjs` (iPhone, Android phone, iPad, Android tablet, invite link, narrow desktop, `?desktop=1`).
+
+### Reconnect (step 3)
+* A protocol 3 socket that dies without a clean close code (anything but 1000 / 1001; the page closes with 1000 on Disconnect, a tab close sends 1001) keeps its player in **limbo**: slot reserved (it counts toward capacity and the room list), 20 s for clients, 15 s for the host, persisted so a Durable Object restart keeps it. Joins get a token (16 random bytes, stored in the socket attachment and sent in WELCOME, rotated on every resume) and the same token is kept in `sessionStorage` (`zb.resume`) so a reloaded tab can free its old limbo slot (`stale=`).
+* A visible protocol 3 socket that sends nothing for 12 s is treated as dropped too (a dead network does not always close the socket). The check runs on incoming frames (once a second) and in the alarm, no extra alarms. Hidden tabs (C_VIS) are never dropped for silence.
+* **Resume**: `ZbSession` logic in `ZbNetSession.cs`. The client reopens the socket with `rejoin=ID.TOKEN&seq=N` (NOT through `StartClient`, which resets everything), the resumed WELCOME does not run `OnConnectedToServer` or `OnPlayerConnected`, backoff 0.4, 0.8, 1.6, 3 s, a "Connection lost - reconnecting N s" overlay, and the game keeps running meanwhile. The relay replays buffered entries with `seq > N` that are not the player's own, plus S_DESTROY for roots destroyed meanwhile (tombstones, 60 s), then SYNC_DONE. Buffer entries have persistent sequence numbers (snapshot format 2, `bufGen`); after a Durable Object restart the counter jumps by 65536 so no number is reused. The relay counts the buffered operations it parsed from each player (INST, buffered RPC, DESTROY, REMOVE_RPCS, DESTROY_PLAYER) and returns the count in the resumed WELCOME; the client re-sends the missing tail from a ring of its last 4096 operations (count based: nothing is applied twice, own echoes are never replayed). `S_INST` is deduplicated by view id.
+* The WebRTC lane is left alone by a resume (a data channel does not depend on the socket). The relay's `hello` carries `resumed: true`; the client re-announces its channel as up, or starts a new attempt if it has none.
+* Host: same mechanism. Clients see "host connection lost" (host state 1); joins get REJECT(9); requests to the host (`Server` mode RPCs, player-left notices) are queued (300 entries / 128 KB) and delivered on resume. Grace over = the host is gone (below).
+* Test knobs, only with `wrangler dev --var ZB_TEST:1`: `grace=`, `tstale=`, `tclaim=` on `/ws/host`, `X-Zb-Test-Ip`.
+* Tests: `server/test/relay.test.mjs` (resume replays only what was missed and never own entries, token rotation, tombstones, grace expiry, capacity, v2 unchanged, host away / queue, ...), `server/test/e2e/reconnect.mjs` (socket killed mid game: same id, same money, host never sees a leave, lane back, host drop, 26 s offline falls back to the menu).
+
+### Host leaves (step 4)
+* **Level A** (approved by Vito, a deliberate rule change: v0.7 gave clients nothing when the host left): when the host is gone for good (clean leave, tab closed, or its grace ran out) every client banks the match money exactly like the ESC Disconnect does (`money += match money`, saved) and sees "The host left the game. Your money from this match was saved."
+* **Level B, claim restart** (no role pointer, `hostId` stays 0): the relay picks a successor (a visible protocol 3 player, lowest relay rtt, lowest id), bumps `epoch`, tells everybody `HOST_STATE 3`, closes their sockets with REJECT(4) and keeps the room (code, password, name, listing). `/api/room/CODE` then answers `hostState: "restarting"`, `restart: {successor, claimOpen}`. The clients show the host-left screen and poll that endpoint (no socket needed): after a 3 s pause the successor claims the room (`/ws/host?claim=CODE.ID.TOKEN`, the token proves it was a player) and starts a fresh host session (state 3, `LoadLevel(1)`); once `hostState` is `ok` with a new `epoch` everybody else joins it through the normal join path (new ids, fresh avatars, wave 1, match money 0, saved money kept). If the successor does not claim (or opted out with "Main menu") any remaining player may after 10 s; 45 s without a claim closes the room; a lone host leaving closes it at once. A late claimant gets REJECT(8) and joins the winner instead. Not carried over: the host-side ban list. The wave mode of the new match is the new host's own setting.
+* **Why not level C** (state preserving migration): the zombies, wave timers, ground item quantities, construction durability and vehicles live only in the host's scripts and are not in the relay's buffer. Taking them over needs the adopt pass of ~15 scripts that decide their role in `Start()` (`sc_zumbi`, `sc_findmyarea`, `sc_barbwire`, ...), a snapshot stream, an owner remap in the shim, and a multi-browser soak; constructions and vehicles are not even audited. Done blind it would desync silently, so by the design's own rule ("stop if unsafe") level B is the production behaviour and level C stays out. The relay already reserves the ops (18, 19, 0x90-0x94).
+* Tests: `server/test/e2e/host.mjs` (Disconnect with two clients and money, tab close with one client, dead connection beyond the grace, successor opts out, nobody left), plus `e2e.mjs` where the last player now takes over.
+
+### Hidden host tab (step 5)
+* The host's game runs in its tab; browsers pause or throttle hidden tabs, so everyone else sees a freeze. The page sends C_VIS on `visibilitychange`; the relay broadcasts HOST_STATE 2 (also to late joiners, and in `/api/room`); clients show "The host's browser tab is in the background - the game is paused until they come back"; the host's tab title blinks "(!) HOST PAUSED - come back" while hidden and a banner explains on return. A hidden player is never dropped for silence. The JS receive queue of a hidden tab drops lossy frames (state, echo, pong, unbuffered RPC) above 600 queued frames, buffered ones are always kept.
+* **Spike result, honest version**: whether Unity 6 WebGL keeps ticking in a hidden tab with `runInBackground = true` could NOT be measured here. Playwright (headless or headed, with focus emulation off, backgrounding flags removed, windows covering each other, minimised window) always reports `visibilityState === "visible"`, so a hidden tab cannot be reproduced in automation. What is known: Chrome stops `requestAnimationFrame` in hidden tabs and clamps timers to 1 Hz (once a minute after 5 minutes hidden), so the expected result is "effectively paused", which is why the design is warn + show "host paused" rather than try to keep it alive. To get numbers, open the game in a real browser with a second tab and read `ZBSTATS` tx frames over 10 s hidden (`unityInstance.SendMessage("ZbNetRunner","StatsDump","")` works in a hidden tab). `server/test/e2e/hidden.mjs` therefore simulates the visibility change (property + event) and covers the whole signalling path.
+
 ## Relay details (server/src)
 
 * `index.js`: routes `/api/rooms`, `/api/room/:code`, `/api/quickplay`, `/api/ping/:code`, `/ws/host`, `/ws/room/:code`, serves the Unity build from static assets (see Deploy in the README). It also copies the host's `colo` / `country` / `lat` / `lon` (from `request.cf`) into the room at creation; the client cannot set them.
@@ -261,7 +293,7 @@ Everything here sits around the game: `game/Assets/Scripts/ZbMenu.cs` (new file)
 * `lobby.js`: one Durable Object (`idFromName("lobby")`) with the room list. Entries expire 75 s after the last heartbeat. Only rooms whose host chose "Show in server list" appear. `list()` strips lat/lon, `quickplay(type, lat, lon)` ranks candidates (see above).
 * `room.js` also has the read-only RPC methods `info()` (behind `/api/room/:code`, never creates storage) and `ping()`.
 * Authorisation is minimal by design: the sender id is stamped by the relay (clients cannot impersonate), clients can only create objects with their own view-id range, only the host can kick / list / act for other players.
-* Limits: 64 KB per frame, 8 KB per message, 512 messages per frame, per connection token bucket (host 1 MB/s, clients 96 KB/s, 100 consecutive violations close the socket), 20000 buffered entries / 4 MB per room, 16 players, 250 joiners per room lifetime.
+* Limits: 64 KB per frame, 8 KB per message, 512 messages per frame, per connection token bucket (host 1 MB/s, clients 96 KB/s, 100 consecutive violations close the socket), 20000 buffered entries / 4 MB per room, 16 players, 250 joiners per room lifetime; per IP request limits, see "Limits (step 1)" under Resilience.
 
 ## Verified
 
@@ -274,14 +306,14 @@ Everything here sits around the game: `game/Assets/Scripts/ZbMenu.cs` (new file)
 
 ## Known limitations
 
-* Phase 3: the pause-panel settings overlay and the menu use the original's IMGUI look; sliders have no visible track (the original skin has none either). Quick Play ranking is by player count / distance, there is no per-player latency probe beyond the list's relay ping. There is no desktop-only gate for phones yet (phase 5), and no rate limit on `/api/*` (phase 4, step 2 of the design).
-* The host is authoritative and runs the zombie AI, so the host's browser tab must stay visible (browsers throttle background tabs) and the host's connection decides the game's quality. Host migration does not exist (neither did it in the original): if the host leaves the room closes.
+* Phase 3: the pause-panel settings overlay and the menu use the original's IMGUI look; sliders have no visible track (the original skin has none either). Quick Play ranking is by player count / distance, there is no per-player latency probe beyond the list's relay ping. Phones and tablets are gated (a message instead of the game) until phase 5 touch controls.
+* The host is authoritative and runs the zombie AI, so the host's browser tab must stay visible (browsers throttle background tabs; the others see "host paused") and the host's connection decides the game's quality. Mid-match host migration (level C) does not exist; when the host leaves the match ends for everybody and a remaining player starts a new one in the same room (level B).
 * Latency: every message takes browser -> Cloudflare edge -> browser. Fine for friends in one region, noticeable across continents. One Durable Object lives in one location (near the first player).
 * WebSocket (TCP) instead of RakNet (UDP): a lost packet stalls the stream instead of being skipped (interpolation hides short stalls, a long one shows as a freeze, then a catch-up). Host to client state now travels over an unreliable WebRTC data channel when one can be established (see "Data channel lane"), client to host and everything else still over the WebSocket. Positions are sent at about 20 Hz (the game's own counter with `sendrate` 30), see the Feel layer.
 * Vehicles, bags, items and projectiles still use the original chase on 10 Hz `updateposition` (compact now, not interpolated yet).
 * Interpolation delay is at least 100 ms: other players are shown 100 to 150 ms in the past (the original was 150 to 250 ms). Hits are decided by the shooter on what the shooter sees.
 * Clients are trusted as in the original (any client can send any RPC to any view). Not a hardened anti-cheat design.
-* No rate limit on room creation per IP, no profanity filter on room names (the nickname is filtered to letters, digits, space and `_ - .`).
+* No profanity filter on room names (the nickname is filtered to letters, digits, space and `_ - .`).
 * No NAT / port settings: the menu still shows them but they are ignored.
 * `Network.Instantiate` calls with a prefab that is not in the prefab table are logged and not replicated.
 * Zombie `Start` RPCs `asktheanimation` to the server before the animation reference exists; this logs one `NullReferenceException` per zombie on the host. The call came from the original (the logged exception is harmless) and is kept as is.

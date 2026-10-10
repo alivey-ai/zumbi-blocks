@@ -82,6 +82,10 @@ New logic lives in `ZbMenu.cs` (`ZbMenu`, `ZbSettings`). The decompiled scripts 
 - `sc_player`: `headang += ZbSettings.MouseY() * mouse_sense;` (invert Y).
 - `sc_spawner` pause panel (state 2): the Options button, empty in the original, sets `ZbMenu.overlay = true`.
 
+## Phase 4 hooks in the recovered scripts (re-apply after a re-rip)
+New logic: `ZbNetSession.cs` (resume), `ZbMenu.cs` (host-left screen). One-line hooks:
+- `sc_gamecontrol.OnDisconnectedFromServer`: `ZbMenu.HostLeftBank(this)` before `gamestate = 8` (banks the match money when the host left), `ZbMenu.HostLeftScreen(this)` after `Application.LoadLevel(2)` (host-left screen / claim restart; also re-parents the camera to DontDestroyOnLoad: the original unparents it into the city scene, which kills it, and the next match then throws).
+
 ## Particle effects (checked 2026-10-09)
 The backlog said `muzle rifle`, `Rflare_out` and `shotRPG` used Unity 4 legacy particles (Ellipsoid/Mesh Particle Emitter, Particle Animator, Particle Renderer) that Unity 6 removed. **That was wrong.**
 - Scan of the raw original data (`ripped/src/ZB_Data`, every object of mainData, level0-1, sharedassets0-2, read with UnityPy): no object of class 12 (ParticleAnimator), 15 (EllipsoidParticleEmitter), 26/98 (ParticleEmitter, MeshParticleEmitter) or 27 (ParticleRenderer) exists. The only particle components are 29 `ParticleSystem` (class 198) + 29 `ParticleSystemRenderer` (199), i.e. Shuriken, which Unity 6 still has and imports from the Unity 4 YAML unchanged (AssetRipper exported them; the exported project and `game/` are identical for these prefabs).

@@ -106,8 +106,10 @@
     // The copy runs from a real click on this DOM button: the clipboard API is unreliable from inside the game canvas.
     // The link never contains a password (password rooms ask for it after the link is opened).
     window.zbInviteUrl = "";
+    window.zbHosting = false;
     window.zbSetRoom = function (code, hosting) {
       var bar = document.querySelector("#invite");
+      window.zbHosting = !!code && !!hosting;
       if (!code) { bar.style.display = "none"; window.zbInviteUrl = ""; return; }
       window.zbInviteUrl = location.origin + "/?room=" + encodeURIComponent(code);
       document.querySelector("#invite-code").textContent = code;
@@ -122,6 +124,23 @@
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(window.zbInviteUrl).then(function () { done(true); }, fallback);
       else fallback();
     };
+    // The host's game runs in this tab, and browsers pause / throttle hidden tabs (see docs/MULTIPLAYER.md, "Hidden host tab"): everybody else sees
+    // the game freeze. While this tab is hidden and it hosts, blink the tab title so it is noticed in the tab strip, and say it on return.
+    (function () {
+      var orig = document.title, blink = 0, hiddenAt = 0;
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "hidden") {
+          if (!window.zbHosting) return;
+          hiddenAt = Date.now();
+          blink = setInterval(function () { document.title = document.title === orig ? "(!) HOST PAUSED - come back" : orig; }, 1000);
+        } else {
+          if (blink) { clearInterval(blink); blink = 0; document.title = orig; }
+          if (hiddenAt && window.zbHosting && Date.now() - hiddenAt > 3000)
+            showBanner("This tab was in the background for " + Math.round((Date.now() - hiddenAt) / 1000) + " s: you are the host, so the other players saw the game freeze. Keep this tab visible while hosting.");
+          hiddenAt = 0;
+        }
+      });
+    })();
     function showBanner(msg, type) {
       var wb = document.querySelector("#warning");
       var d = document.createElement("div");

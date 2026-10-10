@@ -29,12 +29,17 @@ Make online play feel smooth without changing the network architecture.
 - [x] Better server list: players/max, current wave, ping, region, room name; full rooms marked and sorted last; refresh every 10 s.
 - [x] **Invite links**: `.../?room=ABCDE` joins directly (build check, clean errors); copy button on the page while in a room.
 - [x] Settings: mouse sensitivity and volume (the original's), FOV, graphics quality (Low / Medium / High), invert Y. Saved locally; also from the in-game pause panel.
-- [ ] Desktop-only gate for phones (design step 7 part, lifted by Phase 5 touch controls); `/api/*` rate limits (phase 4 step 2).
+- [x] Desktop-only gate for phones and tablets (phase 4; lifted by Phase 5 touch controls); `/api/*` rate limits (phase 4 step 1).
 
-## Phase 4 — Resilience
-- **Reconnect** after a short drop (keep your player for ~20 s).
-- **Host migration**: if the host leaves, the next player takes over and the match continues.
-- Host-tab-hidden warning/handling; basic rate limits and message size limits against griefing.
+## Phase 4 — Resilience (done except level C, see docs/MULTIPLAYER.md "Resilience (phase 4)")
+- [x] **Limits**: per IP rate limits on `/api/*`, new rooms, joins and rejoins (NAT and reconnect-storm sized), per-socket message budget; all in memory / in the Lobby DO, free plan only.
+- [x] **Desktop-only gate**: phones and tablets see a message, nothing is downloaded.
+- [x] **Reconnect** after a short drop (keep your player for 20 s, host 15 s): resume token, limbo slot, seq replay, count based resend, WebRTC lane comes back. Intentional leave / tab close skips the grace.
+- [x] **Host leaves, level A** (approved): players keep the money of the match, clean "host left" screen.
+- [x] **Host leaves, level B "claim restart"**: a remaining player takes over the same room code and the group continues in a new match (wave 1) without the menu.
+- [ ] **Host migration level C** (state preserving, mid-match): NOT built, see "Why not level C" in MULTIPLAYER.md.
+- [x] **Hidden host tab**: host's tab title blinks a warning, clients see "host paused" instead of a silent freeze, hidden tabs are never dropped. Spike: a hidden tab cannot be reproduced with Playwright (see MULTIPLAYER.md), numbers still to be taken by hand in a real browser.
+- [x] Rate and message size limits against griefing (first layer; RPC / INST content validators in shadow mode are not done).
 
 ## Phase 5 — Community
 - Leaderboards (Cloudflare D1): best wave solo / with friends, kills; daily and all-time.

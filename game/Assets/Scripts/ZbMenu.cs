@@ -382,6 +382,9 @@ public static class ZbMenu
 
     public static void HostLeftScreen(sc_gamecontrol g)
     {
+        // The original unparents the camera (cam.parent = null) before leaving a match: that puts it into the city scene, which is destroyed by the
+        // scene change, and the next match (host start: cam.parent = observator) then throws. Keep it alive.
+        if (g.cam != null) UnityEngine.Object.DontDestroyOnLoad(g.cam.gameObject);
         if (!banked) return;
         banked = false;
         leftSession = ZbNet.lost;
@@ -444,6 +447,7 @@ public static class ZbMenu
     {
         Frame(g);
         // the continue timer is polled by the routine; the screen only shows its latest status
+        Cursor.lockState = CursorLockMode.None; Cursor.visible = true; // the match left the pointer locked (a script of the old scene re-locks it after the disconnect)
         Msg(g, cx, -190, "The host left the game.", Color.yellow);
         Msg(g, cx, -150, "Your money from this match ($" + leftMoney + ") was saved.", Color.white);
         Msg(g, cx, -90, leftStatus, Color.green);
