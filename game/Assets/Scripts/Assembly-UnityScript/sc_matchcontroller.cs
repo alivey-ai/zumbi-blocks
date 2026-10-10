@@ -479,6 +479,7 @@ public class sc_matchcontroller : MonoBehaviour
 		}
 		if (gamestarted)
 		{
+			ZbMenu.ApplyLoot(this); // playtest feature: Loot More (host room option); Classic returns at once and leaves the prefab values alone
 			itemspawncont += 1000f * itemspawnrate * Time.deltaTime;
 			if (!(itemspawncont <= 1000f))
 			{
@@ -522,10 +523,14 @@ public class sc_matchcontroller : MonoBehaviour
 				}
 			}
 			zsinscene = GameObject.FindGameObjectsWithTag("zumbi");
-			if (canlongwave)
+			// Timed waves (playtest feature, default; ZbMenu.TimedWaves()): the 120 s "long wave" timer of the original is armed for EVERY wave.
+			// The original arms it only if the previous wave was cleared (canlongwave) and disarms it after a timed-out wave. Classic = exactly that.
+			bool timedwaves = ZbMenu.TimedWaves();
+			if (canlongwave || timedwaves)
 			{
 				longwaveconter += 1f * Time.deltaTime;
 			}
+			((sc_matchdata)(object)((Component)matchdata).GetComponent(typeof(sc_matchdata))).waveleft = timedwaves ? Mathf.Max(0, Mathf.CeilToInt(120f - longwaveconter)) : (-1);
 			zspawncont += 1f * Time.deltaTime;
 			if (zsinscene.Length <= 3 || !(longwaveconter <= 120f))
 			{
@@ -549,9 +554,11 @@ public class sc_matchcontroller : MonoBehaviour
 						everybodyspawners[num6].NetView().RPC("servermessage", (RPCMode)2, new object[1] { "Wave " + wave });
 					}
 				}
-				for (num6 = 0; num6 < zminforwave + (wave - 1); num6++)
+				int zcount = ZbMenu.WaveZombies(zminforwave + (wave - 1), ZbMenu.Players()); // Timed waves: scaled with the players in the match (Classic: unchanged)
+				int zcap = ZbMenu.ZombieCap(zsmax, ZbMenu.Players());
+				for (num6 = 0; num6 < zcount; num6++)
 				{
-					if (zsinscene.Length < zsmax)
+					if (zsinscene.Length < zcap)
 					{
 						if (zspawnpoints.Length > 0)
 						{

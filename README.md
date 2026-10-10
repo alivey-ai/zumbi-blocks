@@ -14,7 +14,7 @@ The game and its assets belong to Adrian (AdrianKS, now making Zumbi Blocks 2). 
 1. Recovered the project from the bundle (AssetRipper) into the `game/` Unity project (`docs/RECOVERY.md`).
 2. Ported to Unity 6 (6000.2.14f1) WebGL, single player works.
 3. Online multiplayer on Cloudflare: one player's browser hosts, a Worker + Durable Object relays (`docs/MULTIPLAYER.md`, `server/`).
-4. Resilience (phase 4): rate limits, desktop-only gate for phones, reconnect after a short drop, host leaves = players keep their money and a remaining player takes over the room, hidden host tab warning.
+4. Resilience (phase 4): rate limits, desktop-only gate for phones, reconnect after a short drop, host leaves = players keep their money and a remaining player takes over the room, hidden host tab warning. Playtest additions: timed waves, wave number on the HUD, teammates' health.
 
 ## Layout
 - `game/` Unity project. `Assets/Scripts/LegacyNetworkShim.cs` + `ZbNet.cs` + `Assets/Plugins/WebGL/ZbNet.jslib` implement the old Unity networking API on top of the relay. `Assets/Scripts/ZbMenu.cs` has the phase 3 menu logic (Quick Play, invite links, nickname prompt, settings, server list columns).
@@ -55,4 +55,4 @@ Online play tries a direct browser-to-browser connection (WebRTC data channel, f
 Manual: Start Game, then Create server (give it a name of 4+ characters; "Show in server list" toggles public listing; optional password).
 Everyone else: Join server (pick from the list) or Direct IP, where the "Room code" field takes the 5 letter code that the host sees in the top right corner of the screen.
 The host presses ENTER to start the match.
-If the connection drops for a few seconds the game reconnects by itself ("Connection lost - reconnecting"). If the host leaves, you keep the match money and a remaining player becomes the new host of the same room (a new match starts after a few seconds; "Main menu" cancels). Hosts: keep your tab visible, the others see "host paused" when it is in the background. Phones and tablets are not supported yet (a message is shown).
+The create-server screen has **Waves: Timed / Classic** (Timed is the default: the next wave also starts 2 minutes after the previous one even if zombies are left; Classic is the original rule). If the connection drops for a few seconds the game reconnects by itself ("Connection lost - reconnecting"). If the host leaves, you keep the match money and a remaining player becomes the new host of the same room (a new match starts after a few seconds; "Main menu" cancels). Hosts: keep your tab visible, the others see "host paused" when it is in the background. Phones and tablets are not supported yet (a message is shown).

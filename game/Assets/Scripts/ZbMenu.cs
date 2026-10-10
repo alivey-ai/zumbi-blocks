@@ -360,6 +360,82 @@ public static class ZbMenu
         if (Btn(g, cx, -30, "Main menu")) { ZbWs.ClearInviteParam(); g.gamestate = 0; }
     }
 
+    // ---- waves: Timed (default) / Classic (playtest feature) ----------------------------------------------------------------------------
+    // Timed: the next wave starts when (almost) all zombies are dead OR when 120 s have passed, whichever comes first (the original has the 120 s timer
+    // too, but arms it only if the previous wave was cleared). Classic: exactly the original. Quick Play rooms are always Timed.
+    public static bool timedWaves = true;
+    static bool wavesLoaded;
+    public static bool TimedWaves()
+    {
+        if (!wavesLoaded) { wavesLoaded = true; timedWaves = PlayerPrefs.GetInt("ZBX_classic_waves", 0) != 1; }
+        return quickHosting || timedWaves || !Network.isServer; // only the host's value matters; Quick Play rooms are Timed
+    }
+    // the create-server screen (state 25), where the original had the NAT toggle (ignored in this port)
+    public static void WavesToggle(sc_gamecontrol g, int cx)
+    {
+        TimedWaves();
+        string t = timedWaves ? "Waves: Timed (next wave after 2 min at the latest)" : "Waves: Classic (original rules)";
+        if (GUI.Button(new Rect(cx - 200, Screen.height / 2 + 5, 400f, 32f), t))
+        {
+            timedWaves = !timedWaves; PlayerPrefs.SetInt("ZBX_classic_waves", timedWaves ? 0 : 1); PlayerPrefs.Save();
+        }
+    }
+
+    // Zombies per wave in Timed waves: (zminforwave + wave - 1) * (1 + 0.5 * (players - 1)), i.e. 1 player x1, 2 x1.5, 3 x2, 4 x2.5; the cap on zombies
+    // alive (original 50) grows by the same factor but never beyond ZOMBIE_CEILING. Per-zombie stats stay the original's. Classic: unchanged.
+    public const int ZOMBIE_CEILING = 80;
+    // human players connected to this match (the host's own `spawners` counter is one too high: the host's spawner is added twice)
+    public static int Players() { return ZbNet.Connected ? ZbNet.remoteCount + 1 : 1; }
+    public static float WaveFactor(int players) { return 1f + 0.5f * (Mathf.Max(1, players) - 1); }
+    public static int WaveZombies(int basecount, int players) { return TimedWaves() ? Mathf.RoundToInt(basecount * WaveFactor(players)) : basecount; }
+    public static int ZombieCap(int orig, int players) { return TimedWaves() ? Mathf.Max(orig, Mathf.Min(ZOMBIE_CEILING, Mathf.RoundToInt(orig * WaveFactor(players)))) : orig; }
+
+    // ---- loot: More (default) / Classic (playtest feature) ---------------------------------------------------------------------------------
+    // Classic: the original matchcontroller values, never touched (itemspawnrate 0.05 = one item / 20 s, ismax 20, 30 % real items, 2 % zombie backpacks).
+    // More: scaled with the number of players in the match, recomputed every frame on the host: item interval 10 / 7 / 5 / 4 s for 1 / 2 / 3 / 4+ players,
+    // item cap 40 + 10 per extra player (max 80), 50 % real items (rest ammo crates), 10 % zombie backpacks, and grenades (grenadeground,
+    // stickgrenadeground) join the random item list. Only the host spawns loot; the prefab values are not edited (runtime override).
+    public static bool moreLoot = true;
+    static bool lootLoaded, lootInit; static sc_matchcontroller lootFor;
+    public static bool MoreLoot()
+    {
+        if (!lootLoaded) { lootLoaded = true; moreLoot = PlayerPrefs.GetInt("ZBX_classic_loot", 0) != 1; }
+        return quickHosting || moreLoot;
+    }
+    public static void LootToggle(sc_gamecontrol g, int cx)
+    {
+        MoreLoot();
+        GUI.color = Color.red;
+        GUI.DrawTexture(new Rect(cx - g.newhud[0].width / 2, Screen.height / 2 + 50, g.newhud[0].width, g.newhud[0].height), g.newhud[0], ScaleMode.StretchToFill, true, 0f);
+        GUI.color = Color.white;
+        string t = moreLoot ? "Loot: More (scales with the players, grenades)" : "Loot: Classic (original rules)";
+        if (GUI.Button(new Rect(cx - 200, Screen.height / 2 + 55, 400f, 32f), t)) { moreLoot = !moreLoot; PlayerPrefs.SetInt("ZBX_classic_loot", moreLoot ? 0 : 1); PlayerPrefs.Save(); }
+    }
+    public static void LootFor(int players, out float interval, out int cap)
+    {
+        interval = players <= 1 ? 10f : players == 2 ? 7f : players == 3 ? 5f : 4f;
+        cap = Mathf.Min(80, 40 + 10 * (Mathf.Max(1, players) - 1));
+    }
+    // sc_matchcontroller.Update (host), before the item spawner runs
+    public static void ApplyLoot(sc_matchcontroller mc)
+    {
+        if (!MoreLoot()) return;
+        if (!lootInit || lootFor != mc)
+        {
+            lootInit = true; lootFor = mc;
+            var add = new List<Transform>(); var w = new List<int>(mc.itensprob);
+            foreach (var n in new[] { "grenadeground", "stickgrenadeground" })
+            {
+                var pf = ZbNet.FindPrefab(n);
+                if (pf != null) { add.Add(pf.transform); w.Add(20); } else Debug.LogWarning("[zbmenu] loot prefab missing: " + n);
+            }
+            var l = new List<Transform>(mc.itemsrand); l.AddRange(add);
+            mc.itemsrand = l.ToArray(); mc.itensprob = w.ToArray();
+        }
+        float interval; int cap; LootFor(Players(), out interval, out cap);
+        mc.itemspawnrate = 1f / interval; mc.ismax = cap; mc.probmin = 50; mc.backpackprobmin = 5;
+    }
+
     // ---- host left (phase 4) ------------------------------------------------------------------------------------
     // Level A (approved): when the host leaves, the players keep the money of the match (banked like the ESC Disconnect does).
     // Level B: the relay picks a remaining player as the new host ("claim restart"); everybody else polls /api/room/CODE and joins the new match
@@ -447,10 +523,10 @@ public static class ZbMenu
     {
         Frame(g);
         // the continue timer is polled by the routine; the screen only shows its latest status
-        Cursor.lockState = CursorLockMode.None; Cursor.visible = true; // the match left the pointer locked (a script of the old scene re-locks it after the disconnect)
         Msg(g, cx, -190, "The host left the game.", Color.yellow);
         Msg(g, cx, -150, "Your money from this match ($" + leftMoney + ") was saved.", Color.white);
         Msg(g, cx, -90, leftStatus, Color.green);
+        Cursor.lockState = CursorLockMode.None; Cursor.visible = true; // the match left the pointer locked (a script of the old scene re-locks it after the disconnect)
         if (Btn(g, cx, 0, "Main menu")) { restartToken++; g.gamestate = 0; }
     }
 

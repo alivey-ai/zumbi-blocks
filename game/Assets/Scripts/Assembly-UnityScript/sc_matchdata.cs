@@ -54,6 +54,9 @@ public class sc_matchdata : MonoBehaviour
 
 	public int playersingame;
 
+	// playtest features (not in v0.7): seconds until the next wave starts by itself (-1 = classic waves, no timer); set by the host, synced to everybody
+	public int waveleft = -1;
+
 	public sc_matchdata()
 	{
 		sendrate = 2f;
@@ -109,6 +112,7 @@ public class sc_matchdata : MonoBehaviour
 			if (!(dataconter <= 1000f))
 			{
 				((Component)this).NetView().RPC("sendstuff", (RPCMode)1, new object[5] { minutes, seconds, zombieskilled, isstarted, isended });
+				((Component)this).NetView().RPC("syncwavetimer", (RPCMode)1, new object[1] { waveleft });
 				dataconter -= 1000f;
 			}
 		}
@@ -152,7 +156,12 @@ public class sc_matchdata : MonoBehaviour
 		text2 = ((seconds >= 10) ? (string.Empty + seconds) : ("0" + seconds));
 		GUI.skin = guiskin;
 		GUI.color = Color.yellow;
-		GUI.Label(new Rect((float)(Screen.width / 2 - 200), 10f, 400f, 40f), text + ":" + text2);
+		GUI.Label(new Rect((float)(Screen.width / 2 - 200), 10f, 400f, 40f), (isstarted ? "Wave " + wave + "   " : string.Empty) + text + ":" + text2);
+		if (isstarted && waveleft > 0)
+		{
+			int wl = waveleft;
+			GUI.Label(new Rect((float)(Screen.width / 2 - 200), 34f, 400f, 40f), "Next wave in " + (wl / 60) + ":" + ((wl % 60 >= 10) ? (string.Empty + wl % 60) : ("0" + wl % 60)));
+		}
 		GUI.skin = chatskin;
 		GUI.color = Color.white;
 		for (num = 0; num < messages; num++)
@@ -175,6 +184,19 @@ public class sc_matchdata : MonoBehaviour
 			GUI.Label(new Rect(5f, (float)(25 + num * 15), 500f, 25f), themessage[num]);
 		}
 		GUI.color = Color.white;
+	}
+
+	[RPC]
+	public void syncwavetimer(int left)
+	{
+		waveleft = left;
+	}
+
+	// playtest feature: every player sends its own health (the owner knows it best); ZbTeam shows it
+	[RPC]
+	public void synchealth(int ownerId, int hp)
+	{
+		ZbTeam.Set(ownerId, hp);
 	}
 
 	[RPC]

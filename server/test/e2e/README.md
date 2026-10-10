@@ -19,9 +19,10 @@ With the WebRTC lane (phase 2) the headless Chrome gets `--disable-features=WebR
 
 If `e2e.mjs` late-joiner checks fail locally but pass live, clear stale local Durable Object state: `rm -rf server/.wrangler/state` and restart `wrangler dev`.
 
-Phase 4 tests (all need the local Worker started with `npx wrangler dev --port 8799 --var ZB_TEST:1` after `rm -rf server/.wrangler/state`; `BASE=http://localhost:8799/ CH=chrome node X.mjs`; only `relay.test.mjs` needs the `ZB_TEST` var for the limits / short grace tests, the browser tests also run against the live URL):
+Phase 4 / playtest tests (all need the local Worker started with `npx wrangler dev --port 8799 --var ZB_TEST:1` after `rm -rf server/.wrangler/state`; `BASE=http://localhost:8799/ CH=chrome node X.mjs`; only `relay.test.mjs` needs the `ZB_TEST` var for the limits / short grace tests, the browser tests also run against the live URL):
 - `mobile.mjs` desktop-only gate (iPhone / Android / iPad / tablet UAs, invite link, narrow desktop, `?desktop=1`).
 - `reconnect.mjs` kills the client's / host's WebSocket mid game (same id, money, lane), then a 26 s offline outage (back to the menu).
 - `host.mjs` host leaves: Disconnect with money (level A), tab close, dead connection beyond the grace, successor opts out, nobody left; claim restart (level B).
 - `hidden.mjs` hidden host tab (visibility is simulated: Playwright cannot background a page).
+- `playtest.mjs` timed waves vs Classic, HUD wave value, teammates' health.
 Room names typed in the create screen are cut at 10 characters.

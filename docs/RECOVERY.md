@@ -82,9 +82,12 @@ New logic lives in `ZbMenu.cs` (`ZbMenu`, `ZbSettings`). The decompiled scripts 
 - `sc_player`: `headang += ZbSettings.MouseY() * mouse_sense;` (invert Y).
 - `sc_spawner` pause panel (state 2): the Options button, empty in the original, sets `ZbMenu.overlay = true`.
 
-## Phase 4 hooks in the recovered scripts (re-apply after a re-rip)
-New logic: `ZbNetSession.cs` (resume), `ZbMenu.cs` (host-left screen). One-line hooks:
+## Phase 4 / playtest hooks in the recovered scripts (re-apply after a re-rip)
+New logic: `ZbNetSession.cs` (resume), `ZbTeam.cs` (teammates' health), `ZbMenu.cs` (host-left screen, waves toggle). One-line hooks:
 - `sc_gamecontrol.OnDisconnectedFromServer`: `ZbMenu.HostLeftBank(this)` before `gamestate = 8` (banks the match money when the host left), `ZbMenu.HostLeftScreen(this)` after `Application.LoadLevel(2)` (host-left screen / claim restart; also re-parents the camera to DontDestroyOnLoad: the original unparents it into the city scene, which kills it, and the next match then throws).
+- `sc_gamecontrol.OnGUI` state 25: `ZbMenu.WavesToggle(this, num7)` replaces the NAT toggle (ignored in this port).
+- `sc_matchcontroller` (wave timer): `ZbMenu.TimedWaves()` arms the 120 s timer for every wave; `matchdata.waveleft` is set from it.
+- `sc_matchdata`: field `waveleft`, RPCs `syncwavetimer` and `synchealth` (-> `ZbTeam.Set`), `syncwavetimer` is sent next to `sendstuff`; `OnGUI` draws "Wave N" before the clock and "Next wave in m:ss" below it.
 
 ## Particle effects (checked 2026-10-09)
 The backlog said `muzle rifle`, `Rflare_out` and `shotRPG` used Unity 4 legacy particles (Ellipsoid/Mesh Particle Emitter, Particle Animator, Particle Renderer) that Unity 6 removed. **That was wrong.**

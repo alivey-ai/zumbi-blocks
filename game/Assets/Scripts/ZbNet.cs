@@ -166,6 +166,14 @@ public static partial class ZbNet
         for (int i = 0; i < table.prefabs.Length; i++)
             if (table.prefabs[i] != null) prefabIndex[table.prefabs[i].GetInstanceID()] = i;
     }
+    // a prefab of the network prefab table by name (host side loot: the table holds every prefab, so clients can instantiate what the host spawns)
+    public static GameObject FindPrefab(string name)
+    {
+        LoadTable();
+        if (table == null) return null;
+        foreach (var p in table.prefabs) if (p != null && p.name == name) return p;
+        return null;
+    }
     static GameObject ToGo(UnityEngine.Object o)
     {
         var g = o as GameObject; if (g != null) return g;
@@ -245,7 +253,7 @@ public static partial class ZbNet
         mode = Mode.Offline; synced = false; remoteCount = 0; roomCode = ""; counter = 0; localId = 0;
         outLen = 0; playerIp.Clear(); playerPing.Clear(); pendingRpcs.Clear(); myPing = 0; ZbSync.Reset(); nextEcho = 0;
         fastLen = 0; fastAny = fastAll = false; parked.Clear(); laneUp.Clear(); ctxViaDc = false;
-        ResetResume();
+        ResetResume(); ZbTeam.Reset();
     }
 
     // ---- ids ---------------------------------------------------------------------------------
@@ -1092,6 +1100,7 @@ public class NetRunner : MonoBehaviour
         ZbNet.Tick();
         ZbMenu.Tick();
         ZbSync.TickRates();
+        ZbTeam.Tick();
         fpsDt += (Time.unscaledDeltaTime - fpsDt) * 0.05f;
         if (Input.GetKeyDown(KeyCode.F3)) showStats = !showStats;
     }
@@ -1113,6 +1122,19 @@ public class NetRunner : MonoBehaviour
         var g = FindFirstObjectByType<sc_gamecontrol>(); if (g == null) return;
         Debug.Log("ZBPREFS {\"money\":" + g.money + ",\"skin\":" + g.my_skincolor + ",\"beard\":" + g.my_beard + ",\"beardcolor\":" + g.my_beardcolor + ",\"shirt\":" + g.my_shirtcolor
             + ",\"nick\":\"" + g.playernick + "\",\"inv3\":" + g.invent[3] + ",\"vol\":" + g.audiovol + ",\"sens\":" + g.mousesense + ",\"fov\":" + ZbSettings.fov + ",\"invy\":" + (ZbSettings.invertY ? 1 : 0) + ",\"quality\":" + ZbSettings.quality + ",\"qlevel\":" + QualitySettings.GetQualityLevel() + ",\"gamestate\":" + g.gamestate + "}");
+    }
+
+    static int CountNamed(string n) { int c = 0; foreach (var t in FindObjectsByType<sc_canbetaken>(FindObjectsSortMode.None)) if (t.name.Contains(n)) c++; return c; }
+    static string MyItems()
+    {
+        foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); if (nv != null && nv.isMine && p.item != null) return "[" + string.Join(",", p.item) + "]"; }
+        return "[]";
+    }
+    static string LootJson()
+    {
+        var mc = FindFirstObjectByType<sc_matchcontroller>(); if (mc == null) return "null";
+        int gr = 0; if (mc.itemsrand != null) foreach (var t in mc.itemsrand) if (t != null && t.name.Contains("grenadeground")) gr++;
+        return "{\"rate\":" + mc.itemspawnrate.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + ",\"max\":" + mc.ismax + ",\"probmin\":" + mc.probmin + ",\"bp\":" + mc.backpackprobmin + ",\"kinds\":" + (mc.itemsrand != null ? mc.itemsrand.Length : 0) + ",\"gren\":" + gr + ",\"spawners\":" + ZbMenu.Players() + "}";
     }
 
     // Test/debug hook: unityInstance.SendMessage("ZbNetRunner", "DebugDump", "") prints one "ZBDUMP {json}" line to the console.
@@ -1161,10 +1183,11 @@ public class NetRunner : MonoBehaviour
         if (minLife < float.MaxValue) sb.Append(",\"zlifeMin\":").Append(Mathf.Round(minLife)).Append(",\"zlifeMax\":").Append(Mathf.Round(maxLife));
         var md = FindFirstObjectByType<sc_matchdata>();
         sb.Append(",\"killed\":").Append(md != null ? md.zombieskilled : -1);
+        sb.Append(",\"grounditems\":").Append(GameObject.FindGameObjectsWithTag("grounditem").Length).Append(",\"gren\":").Append(CountNamed("grenadeground")).Append(",\"items\":").Append(MyItems()).Append(",\"loot\":").Append(LootJson()).Append(",\"mdwave\":").Append(md != null ? md.wave : -1).Append(",\"waveleft\":").Append(md != null ? md.waveleft : -2).Append(",\"mdstarted\":").Append(md != null && md.isstarted ? 1 : 0).Append(",\"timed\":").Append(ZbMenu.TimedWaves() ? 1 : 0);
         { // phase 4 tests: the money of the local player's match, and the saved (banked) money
             var gc = FindFirstObjectByType<sc_gamecontrol>();
             int mm = -1; foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) mm = sp.money; }
-            sb.Append(",\"money\":").Append(mm).Append(",\"bank\":").Append(gc != null ? gc.money : -1).Append(",\"lastacc\":").Append(gc != null ? gc.lastaccmoney : -1).Append(",\"gstate\":").Append(gc != null ? gc.gamestate : -1);
+            sb.Append(",\"team\":").Append(ZbTeam.Json()).Append(",\"scene\":").Append(UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex).Append(",\"money\":").Append(mm).Append(",\"bank\":").Append(gc != null ? gc.money : -1).Append(",\"lastacc\":").Append(gc != null ? gc.lastaccmoney : -1).Append(",\"gstate\":").Append(gc != null ? gc.gamestate : -1);
         }
         foreach (var p in players) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) sb.Append(",\"hp\":").Append(Mathf.Round(lf.quantia)); }
         sb.Append("}");
@@ -1204,6 +1227,39 @@ public class NetRunner : MonoBehaviour
     public void DebugMoney(string a)
     {
         foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) sp.money = int.Parse(a); }
+    }
+
+    // Test hooks (wave timer): DebugWaveClock("115") sets the host's wave timer (seconds since the wave started); DebugWaves("classic"|"timed") picks the mode
+    // for the next room, like the create-server screen's toggle.
+    public void DebugWaveClock(string a) { var mc = FindFirstObjectByType<sc_matchcontroller>(); if (mc != null) mc.longwaveconter = float.Parse(a); }
+    public void DebugWaves(string a) { ZbMenu.TimedWaves(); ZbMenu.timedWaves = a != "classic"; }
+
+    // Test hooks (loot): DebugLootNow("100") makes the host's item spawner run now with that chance (percent) of a real item instead of an ammo crate;
+    // DebugGrab("grenadeground") picks up the nearest ground item whose name contains the text, like pressing E on it.
+    public void DebugLoot(string a) { ZbMenu.MoreLoot(); ZbMenu.moreLoot = a != "classic"; }
+    // DebugZmax("200") lifts the zombie cap of the running match (performance measurement only)
+    public void DebugZmax(string a) { var mc = FindFirstObjectByType<sc_matchcontroller>(); if (mc != null) mc.zsmax = int.Parse(a); }
+    public void DebugLootNow(string a)
+    {
+        var mc = FindFirstObjectByType<sc_matchcontroller>(); if (mc == null) return;
+        mc.probmin = Mathf.RoundToInt(mc.probmax * float.Parse(a) / 100f); mc.itemspawncont = 1001f;
+    }
+    public void DebugGrab(string a)
+    {
+        sc_player me = null;
+        foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); if (nv != null && nv.isMine) me = p; }
+        if (me == null) { Debug.Log("ZBGRAB noplayer"); return; }
+        sc_canbetaken best = null; float bd = float.MaxValue;
+        foreach (var it in FindObjectsByType<sc_canbetaken>(FindObjectsSortMode.None)) { if (!it.name.Contains(a)) continue; float d = (it.transform.position - me.transform.position).sqrMagnitude; if (d < bd) { bd = d; best = it; } }
+        if (best == null) { Debug.Log("ZBGRAB none"); return; }
+        if (Network.isClient) best.gameObject.NetView().RPC("grabitem", RPCMode.Server, me.myid); else best.grabitem(me.myid);
+        Debug.Log("ZBGRAB " + best.name + " itemid " + best.itemid);
+    }
+
+    // Test hook: DebugHurt("40") takes 40 life points from the local player (a zombie bite without the zombie)
+    public void DebugHurt(string a)
+    {
+        foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) lf.quantia -= float.Parse(a); }
     }
 
     // Test hook: top up the local player's life (idle test players get eaten by zombies).
@@ -1307,6 +1363,7 @@ public class NetRunner : MonoBehaviour
     void OnGUI()
     {
         ZbMenu.OverlayGUI();
+        { var gg = FindFirstObjectByType<sc_gamecontrol>(); if (gg != null && (gg.gamestate == 3 || gg.gamestate == 6)) ZbTeam.OnGUI(gg); }
         if (!ZbNet.Connected || ZbNet.roomCode.Length == 0) return;
         if (style == null) { style = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.UpperRight }; style.normal.textColor = new Color(1f, 1f, 1f, 0.75f); }
         GUI.depth = -1000;

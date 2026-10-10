@@ -41,6 +41,13 @@ Make online play feel smooth without changing the network architecture.
 - [x] **Hidden host tab**: host's tab title blinks a warning, clients see "host paused" instead of a silent freeze, hidden tabs are never dropped. Spike: a hidden tab cannot be reproduced with Playwright (see MULTIPLAYER.md), numbers still to be taken by hand in a real browser.
 - [x] Rate and message size limits against griefing (first layer; RPC / INST content validators in shadow mode are not done).
 
+## Playtest features (asked for after playtesting; not in v0.7, everything else stays original)
+- [x] **Timed waves** (default; host option "Waves: Timed / Classic" on the create-server screen, Quick Play is always Timed): the next wave starts when (almost) all zombies are dead OR 120 s after the wave started, whichever is first; leftover zombies stay. 120 s is the original's own "long wave" timeout, which the original arms only if the previous wave was cleared; Timed arms it for every wave. Classic = exactly the original. The host owns the clock, it is synced to everybody twice a second.
+- [x] **Wave number on the HUD** next to the match time ("Wave 3   1:24") and "Next wave in 1:50" below it.
+- [x] **Teammates' health**: name + health bar list at the left edge and a small bar above teammates' heads; each player sends its own health, "down" for dead players, removed when they leave.
+- [x] **More loot**: host option "Loot: More / Classic" (default More): item interval 10 / 7 / 5 / 4 s and cap 40 / 50 / 60 / 70-80 by player count, 50 % real items, 10 % zombie backpacks, grenades in the random map loot. Classic = original numbers.
+- [x] **Zombies per wave scale with the players** (Timed only): x1 / x1.5 / x2 / x2.5 for 1-4 players, cap on zombies alive up to 80 (60 fps measured at 105 in headless Chrome).
+
 ## Phase 5 — Community
 - Leaderboards (Cloudflare D1): best wave solo / with friends, kills; daily and all-time.
 - Personal stats saved per browser.

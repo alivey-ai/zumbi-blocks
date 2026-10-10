@@ -2645,14 +2645,8 @@ public class sc_gamecontrol : MonoBehaviour
 			{
 				saveinlist = true;
 			}
-			if (usarNat && GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 + 5), 400f, 32f), language[languageset].frase[103]))
-			{
-				usarNat = false;
-			}
-			if (!usarNat && GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 + 5), 400f, 32f), language[languageset].frase[104]))
-			{
-				usarNat = true;
-			}
+			ZbMenu.LootToggle(this, num7); // playtest feature: Loot More / Classic
+			ZbMenu.WavesToggle(this, num7); // playtest feature: Waves Timed / Classic (replaces the NAT toggle, which this port ignores)
 			if (GUI.Button(new Rect((float)(num7 - 200), (float)(Screen.height / 2 + 105), 400f, 32f), language[languageset].frase[105]))
 			{
 				if (S_name.Length < 4)
