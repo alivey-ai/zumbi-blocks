@@ -1,7 +1,7 @@
 // Phase 4 step 4: the host leaves.
 //   Level A (approved): the players keep the money of the match (banked like the ESC Disconnect does).
 //   Level B: a remaining player becomes the new host of the SAME room code ("claim restart") and the group continues in a new match without
-//   going through the menu. Covers: clean leave via Disconnect, tab closed, host connection dead for longer than the grace period, the chosen
+//   going through the menu (level B+: the new match continues at the old wave with everybody's items, see hostplus.mjs). Covers: clean leave via Disconnect, tab closed, host connection dead for longer than the grace period, the chosen
 //   successor opting out, the last player left, and an old host that comes back.
 import { launch, game, createRoom, joinByCode, until, sleep, heal, TEST_FETCH } from "./lib.mjs";
 const BASE = process.env.BASE || "http://localhost:8787/";
@@ -66,7 +66,8 @@ console.log("== 1. host leaves with Disconnect, two clients with money");
     for (let k = 0; k < 4 && !((await hp.dump()).zombies > 0); k++) { await hp.click_(640, 360); await hp.keyboard.press("Enter"); await hp.waitForTimeout(4000); }
     await hp.waitForTimeout(3000);
     const d1 = await hp.dump(), d2 = await cp.dump();
-    check("a new match runs for both: wave 1, zombies on host and client, equal counts", d1.zombies > 0 && d2.zombies > 0 && Math.abs(d1.zombies - d2.zombies) <= 2 && d1.wave === 1, J([d1.zombies, d2.zombies, d1.wave]));
+    // level B+: the match continues at the wave the old one was on (this room never left wave 1; hostplus.mjs covers higher waves)
+    check("the match continues for both: wave 1, zombies on host and client, equal counts", d1.zombies > 0 && d2.zombies > 0 && Math.abs(d1.zombies - d2.zombies) <= 2 && d1.wave === 1, J([d1.zombies, d2.zombies, d1.wave]));
     check("the new match starts with fresh match money (0) and the saved money is untouched", (await hp.dump()).money === 0 && (await cp.dump()).money === 0, J([(await hp.dump()).money, (await cp.dump()).money]));
     check("both players are in the new match (2 avatars each)", d1.players.length === 2 && d2.players.length === 2, J([d1.players.length, d2.players.length]));
     const pa = (await hp.prefs()).money, pb = (await cp.prefs()).money;

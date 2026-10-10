@@ -127,6 +127,13 @@ public class sc_spawner : MonoBehaviour
 		kills++;
 	}
 
+	// host leaves, level B+: the owner restores its kill count of the old match (ZbCarry.OnSpawn)
+	[RPC]
+	public void zbkills(int k)
+	{
+		kills = k;
+	}
+
 	[RPC]
 	public void addmoney(int quant)
 	{
@@ -367,6 +374,7 @@ public class sc_spawner : MonoBehaviour
 					((Behaviour)(sc_player)(object)((Component)val5).GetComponent(typeof(sc_player))).enabled = true;
 					((Behaviour)(sc_onlinecontroller)(object)((Component)val5).GetComponent(typeof(sc_onlinecontroller))).enabled = false;
 					playerobj = val5;
+					ZbCarry.OnSpawn(this, (sc_player)(object)((Component)val5).GetComponent(typeof(sc_player))); // host leaves, level B+: my items / health from the old match
 					canspawn = false;
 					conter = 0f;
 				}

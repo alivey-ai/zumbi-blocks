@@ -128,7 +128,7 @@ export class Room extends DurableObject {
     const hostState = hostHere ? (this.vis.get(0) === false ? "hidden" : "ok") : m.restart ? "restarting" : "away";
     const out = { exists: true, name: m.name, type: m.type, players: n, max: m.max, pw: !!m.pw, started: !!m.started, ended: !!m.ended,
       wave: m.wave || 0, quick: !!m.quick, full: n >= m.max || m.nextId > MAX_PLAYER_ID, hostState, epoch: m.epoch || 0 };
-    if (m.restart) out.restart = { successor: m.restart.successor, claimOpen: Date.now() - m.restart.since > this.claimMs() };
+    if (m.restart) out.restart = { successor: m.restart.successor, claimOpen: Date.now() - m.restart.since > this.claimMs(), wave: m.restart.wave || 0 };
     return out;
   }
   ping() { return 1; }
@@ -776,7 +776,8 @@ export class Room extends DurableObject {
     const members = cands.map(([id, w]) => ({ id, tok: (w.deserializeAttachment() || {}).tok }));
     const m = this.meta;
     m.epoch = ((m.epoch || 0) + 1) & 255;
-    m.restart = { successor: cands[0][0], since: Date.now(), members };
+    // level B+: the wave the old match was on (from the host's C_META), a fallback for players that do not know it (the claimer continues there)
+    m.restart = { successor: cands[0][0], since: Date.now(), members, wave: m.started ? (m.wave || 0) : 0 };
     m.started = false; m.ended = false; m.wave = 0;
     // every player is told and disconnected: the old match is over for everybody. Players of protocol 3 find the new match by polling /api/room/CODE.
     const sockets = [...this.players.entries()].filter(([id]) => id !== 0);

@@ -1117,6 +1117,7 @@ public class NetRunner : MonoBehaviour
         ZbMenu.Tick();
         ZbSync.TickRates();
         ZbTeam.Tick();
+        ZbCarry.Tick(); // host leaves, level B+
         fpsDt += (Time.unscaledDeltaTime - fpsDt) * 0.05f;
         if (Input.GetKeyDown(KeyCode.F3)) showStats = !showStats;
     }
@@ -1206,6 +1207,10 @@ public class NetRunner : MonoBehaviour
             sb.Append(",\"team\":").Append(ZbTeam.Json()).Append(",\"scene\":").Append(UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex).Append(",\"money\":").Append(mm).Append(",\"bank\":").Append(gc != null ? gc.money : -1).Append(",\"lastacc\":").Append(gc != null ? gc.lastaccmoney : -1).Append(",\"gstate\":").Append(gc != null ? gc.gamestate : -1);
         }
         foreach (var p in players) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) sb.Append(",\"hp\":").Append(Mathf.Round(lf.quantia)); }
+        foreach (var p in players) { var nv = p.GetComponent<NetworkView>(); if (nv != null && nv.isMine && p.quant != null) sb.Append(",\"quant\":[").Append(string.Join(",", p.quant)).Append("],\"ammo\":[").Append(string.Join(",", p.ammo)).Append("],\"sel\":").Append(p.itemselected).Append(",\"lifes\":").Append(p.lifes); }
+        { int k = -1; foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) k = sp.kills; } sb.Append(",\"kills\":").Append(k); }
+        if (mc != null) sb.Append(",\"started\":").Append(mc.gamestarted ? 1 : 0).Append(",\"min\":").Append(mc.minute).Append(",\"sec\":").Append(mc.second);
+        sb.Append(",\"carry\":").Append(ZbCarry.Json());
         sb.Append("}");
         Debug.Log("ZBDUMP " + sb);
     }
@@ -1277,6 +1282,28 @@ public class NetRunner : MonoBehaviour
     {
         foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) lf.quantia -= float.Parse(a); }
     }
+
+    // Test hook (level B+): DebugGive("") puts the first gun (item type 0) the local player does not carry into a free slot, with a full magazine
+    // and 77 spare rounds (receiveitem, like a pickup); DebugGive("id,quant,ammo") gives that item. DebugKills("12") sets the local kills.
+    public void DebugGive(string a)
+    {
+        sc_player me = null;
+        foreach (var p in FindObjectsByType<sc_player>(FindObjectsSortMode.None)) { var nv = p.GetComponent<NetworkView>(); if (nv != null && nv.isMine) me = p; }
+        var gc = FindFirstObjectByType<sc_gamecontrol>();
+        if (me == null || gc == null) { Debug.Log("ZBGIVE none"); return; }
+        int id = -1, q = 1, am = 1;
+        if (string.IsNullOrEmpty(a))
+        {
+            for (int i = 0; i < gc.itemlist.Length && id < 0; i++) if (gc.itemlist[i] != null && gc.itemlist[i].tipo == 0 && System.Array.IndexOf(me.item, i) < 0) id = i;
+            if (id < 0) { Debug.Log("ZBGIVE none"); return; }
+            var gun = gc.itemlist[id].prefab != null ? gc.itemlist[id].prefab.GetComponent<sc_gunscript>() : null;
+            q = gun != null ? gun.maxammo : 1; am = 77;
+        }
+        else { var f = a.Split(','); id = int.Parse(f[0]); q = int.Parse(f[1]); am = int.Parse(f[2]); }
+        me.receiveitem(id, q, am);
+        Debug.Log("ZBGIVE " + id);
+    }
+    public void DebugKills(string a) { foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) sp.kills = int.Parse(a); } }
 
     // Test hook: top up the local player's life (idle test players get eaten by zombies).
     public void DebugHeal(string unused)
@@ -1390,6 +1417,7 @@ public class NetRunner : MonoBehaviour
     void OnGUI()
     {
         ZbMenu.OverlayGUI();
+        ZbCarry.OnGUI(); // host leaves, level B+: "Host left - continuing at wave N"
         { var gg = FindFirstObjectByType<sc_gamecontrol>(); if (gg != null && (gg.gamestate == 3 || gg.gamestate == 6)) ZbTeam.OnGUI(gg); }
         if (!ZbNet.Connected || ZbNet.roomCode.Length == 0) return;
         if (style == null) { style = new GUIStyle(GUI.skin.label) { fontSize = 13, alignment = TextAnchor.UpperRight }; style.normal.textColor = new Color(1f, 1f, 1f, 0.75f); }

@@ -240,7 +240,7 @@ public static class ZbMenu
 
     [Serializable] class QRoom { public string code, name, type; public int players, max; public bool pw; }
     [Serializable] class QList { public QRoom[] rooms; }
-    [Serializable] class RestartInfo { public int successor; public bool claimOpen; }
+    [Serializable] class RestartInfo { public int successor; public bool claimOpen; public int wave; }
     [Serializable] class RoomInfo { public bool exists, pw, started, ended, full; public string name, type, hostState; public int players, max, wave, epoch; public RestartInfo restart; }
 
     static IEnumerator Get(string path, Action<long, string> done)
@@ -389,6 +389,7 @@ public static class ZbMenu
     public static bool TimedWaves()
     {
         if (!wavesLoaded) { wavesLoaded = true; timedWaves = PlayerPrefs.GetInt("ZBX_classic_waves", 0) != 1; }
+        int carried = ZbCarry.WavesOverride(); if (carried >= 0 && Network.isServer) return carried == 1; // level B+: a continued match keeps the old room's rule
         return quickHosting || timedWaves || !Network.isServer; // only the host's value matters; Quick Play rooms are Timed
     }
     // the create-server screen (state 25), where the original had the NAT toggle (ignored in this port)
@@ -421,6 +422,7 @@ public static class ZbMenu
     public static bool MoreLoot()
     {
         if (!lootLoaded) { lootLoaded = true; moreLoot = PlayerPrefs.GetInt("ZBX_classic_loot", 0) != 1; }
+        int carried = ZbCarry.LootOverride(); if (carried >= 0) return carried == 1; // level B+: a continued match keeps the old room's rule
         return quickHosting || moreLoot;
     }
     public static void LootToggle(sc_gamecontrol g, int cx)
@@ -472,6 +474,7 @@ public static class ZbMenu
         var sp = g.instedspawner != null ? g.instedspawner.GetComponent<sc_spawner>() : null;
         int m = sp != null ? sp.money : 0;
         g.lastaccmoney = m; g.money += m; g.save();
+        ZbCarry.Freeze(); // level B+: wave, match time, room rules and this player's own items for the continued match
         g.errormsg = "The host left the game. Your money was saved.";
         banked = true; leftMoney = m;
         Debug.Log("[zbmenu] host left: banked " + m + " (total " + g.money + ")");
@@ -501,6 +504,7 @@ public static class ZbMenu
             yield return Get("/api/room/" + Uri.EscapeDataString(L.code), (c, b) => { code = c; body = b; });
             if (token != restartToken || g.gamestate != ST_HOSTLEFT) yield break;
             var info = code == 200 ? JsonUtility.FromJson<RoomInfo>(body) : null;
+            if (info != null && info.restart != null) ZbCarry.RelayInfo(info.restart.wave, info.restart.wave > 0);
             if (code == 404 || (info != null && !info.exists)) { if (++gone >= 3) { leftStatus = "The room was closed."; yield break; } }
             else if (info != null)
             {
@@ -508,6 +512,7 @@ public static class ZbMenu
                 if (info.hostState == "ok" && info.epoch != L.epoch)
                 {
                     leftStatus = "Joining the new match..."; Debug.Log("[zbmenu] restart: joining the new match of " + L.code);
+                    ZbCarry.Begin(false); // level B+: re-apply my own items when my new avatar spawns
                     JoinRoom(g, L.code, false, true);
                     yield break;
                 }
@@ -517,7 +522,7 @@ public static class ZbMenu
                     if (mine || info.restart.claimOpen)
                     {
                         float wait = 3f - (Time.unscaledTime - leftAt); // a short, visible pause (and a chance to cancel)
-                        if (wait > 0f) leftStatus = "You are the new host. Starting a new match in " + Mathf.CeilToInt(wait) + "...";
+                        if (wait > 0f) leftStatus = "You are the new host. " + (ZbCarry.Continues ? "Continuing the match" : "Starting a new match") + " in " + Mathf.CeilToInt(wait) + "...";
                         else { leftStatus = "Starting the new match..."; Debug.Log("[zbmenu] restart: claiming " + L.code + " as host"); Claim(g, L); yield break; }
                     }
                     else leftStatus = "Waiting for " + (info.restart.claimOpen ? "a" : "the") + " new host...";
@@ -532,6 +537,7 @@ public static class ZbMenu
     {
         claiming = true; quickJoining = false; quickHosting = false; needClick = true; countdownEnd = -1f; hostCd = -1f; hostShrunk = false;
         ZbNet.SetClaim(L.code, L.id, L.token);
+        ZbCarry.Begin(true); // level B+: the new match continues at the old wave with the old room's rules
         g.iamserver = true;
         Network.InitializeSecurity();
         Network.incomingPassword = "";
@@ -546,6 +552,7 @@ public static class ZbMenu
         // the continue timer is polled by the routine; the screen only shows its latest status
         Msg(g, cx, -190, "The host left the game.", Color.yellow);
         Msg(g, cx, -150, "Your money from this match ($" + leftMoney + ") was saved.", Color.white);
+        { string cl = ZbCarry.ScreenLine(); if (cl != null) Msg(g, cx, -120, cl, Color.white); } // level B+
         Msg(g, cx, -90, leftStatus, Color.green);
         Cursor.lockState = CursorLockMode.None; Cursor.visible = true; // the match left the pointer locked (a script of the old scene re-locks it after the disconnect)
         if (Btn(g, cx, 0, "Main menu")) { restartToken++; g.gamestate = 0; }

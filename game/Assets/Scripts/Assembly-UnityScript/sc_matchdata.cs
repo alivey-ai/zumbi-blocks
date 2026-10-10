@@ -199,6 +199,13 @@ public class sc_matchdata : MonoBehaviour
 		ZbTeam.Set(ownerId, hp);
 	}
 
+	// host leaves, level B+: the host's room rules (1 timed waves, 2 more loot), so a successor can continue with them
+	[RPC]
+	public void zbroom(int flags)
+	{
+		ZbCarry.OnRoom(flags);
+	}
+
 	[RPC]
 	public void syncwave(int thewave)
 	{
