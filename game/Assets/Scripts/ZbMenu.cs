@@ -412,14 +412,41 @@ public static class ZbMenu
         }
     }
 
-    // Zombies per wave in Timed waves: (zminforwave + wave - 1) * (1 + 0.5 * (players - 1)), i.e. 1 player x1, 2 x1.5, 3 x2, 4 x2.5; the cap on zombies
-    // alive (original 50) grows by the same factor but never beyond ZOMBIE_CEILING. Per-zombie stats stay the original's. Classic: unchanged.
-    public const int ZOMBIE_CEILING = 80;
+    // Zombies per wave in Timed waves: (zminforwave + wave - 1) * (1 + 0.5 * (players - 1)), i.e. 1 player x1, 2 x1.5, 3 x2, 4 x2.5. Per-zombie stats
+    // stay the original's. Nothing is dropped: zombies that cannot spawn now (cap on zombies alive, or the frame rate guard) wait in the host's
+    // backlog (sc_matchcontroller.zbacklog, with their wave number) and spawn ZBACKLOG_RATE per second as soon as there is room. The cap on zombies
+    // alive is only a crash guard: zombieCeiling (ZOMBIE_CEILING, measured with server/test/e2e/fps.mjs, see docs/MULTIPLAYER.md). Classic: the
+    // original's 50 alive, the rest of a wave is dropped, no backlog.
+    public const int ZOMBIE_CEILING = 300;
+    public static int zombieCeiling = ZOMBIE_CEILING;     // DebugZmax overrides it (tests / measurements)
+    public const float ZBACKLOG_RATE = 4f;                // backlog zombies per second
     // human players connected to this match (the host's own `spawners` counter is one too high: the host's spawner is added twice)
     public static int Players() { return ZbNet.Connected ? ZbNet.remoteCount + 1 : 1; }
     public static float WaveFactor(int players) { return 1f + 0.5f * (Mathf.Max(1, players) - 1); }
     public static int WaveZombies(int basecount, int players) { return TimedWaves() ? Mathf.RoundToInt(basecount * WaveFactor(players)) : basecount; }
-    public static int ZombieCap(int orig, int players) { return TimedWaves() ? Mathf.Max(orig, Mathf.Min(ZOMBIE_CEILING, Mathf.RoundToInt(orig * WaveFactor(players)))) : orig; }
+    public static int ZombieCap(int orig, int players) { return TimedWaves() ? Mathf.Max(1, zombieCeiling) : orig; }
+
+    // Frame rate guard (Timed waves, host): when the host's frame rate stays below GUARD_LOW_FPS for GUARD_LOW_S seconds, no more zombies spawn
+    // (wave starts queue their zombies, the backlog waits) until it is back at GUARD_RESUME_FPS or more for GUARD_RESUME_S seconds. Nothing is lost.
+    public const float GUARD_LOW_FPS = 25f, GUARD_LOW_S = 3f, GUARD_RESUME_FPS = 30f, GUARD_RESUME_S = 2f;
+    public static bool guardPaused;
+    // the guard never holds back zombies while fewer than GUARD_MIN_ALIVE are alive (the original's 50): a slow PC still gets the original game
+    public const int GUARD_MIN_ALIVE = 50;
+    public static bool SpawnBlocked(int alive) { return guardPaused && alive >= GUARD_MIN_ALIVE; }
+    public static void GuardReset() { guardPaused = false; guardFps = 60f; guardLow = guardHigh = 0f; }
+    public static int guardForce = -1;                    // test hook DebugZGuard: -1 automatic, 0 never pause, 1 always pause
+    public static float guardFps = 60f;
+    static float guardLow, guardHigh;
+    public static void GuardTick(float dt)
+    {
+        if (dt > 0f)
+        {
+            guardFps += (Mathf.Min(1f / dt, 240f) - guardFps) * Mathf.Min(1f, dt * 2f); // about half a second of smoothing
+            if (!guardPaused) { guardLow = guardFps < GUARD_LOW_FPS ? guardLow + dt : 0f; if (guardLow >= GUARD_LOW_S) { guardPaused = true; guardHigh = 0f; Debug.Log("[zbguard] host fps " + Mathf.Round(guardFps) + ": zombie spawning paused"); } }
+            else { guardHigh = guardFps >= GUARD_RESUME_FPS ? guardHigh + dt : 0f; if (guardHigh >= GUARD_RESUME_S) { guardPaused = false; guardLow = 0f; Debug.Log("[zbguard] host fps " + Mathf.Round(guardFps) + ": zombie spawning resumed"); } }
+        }
+        if (guardForce >= 0) guardPaused = guardForce == 1;
+    }
 
     // ---- loot: More (default) / Classic (playtest feature) ---------------------------------------------------------------------------------
     // Classic: the original matchcontroller values, never touched (itemspawnrate 0.05 = one item / 20 s, ismax 20, 30 % real items, 2 % zombie backpacks).

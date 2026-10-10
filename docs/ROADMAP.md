@@ -47,7 +47,8 @@ Make online play feel smooth without changing the network architecture.
 - [x] **Wave number on the HUD** next to the match time ("Wave 3   1:24") and "Next wave in 1:50" below it.
 - [x] **Teammates' health**: name + health bar list at the left edge and a small bar above teammates' heads; each player sends its own health, "down" for dead players, removed when they leave.
 - [x] **More loot**: host option "Loot: More / Classic" (default More): item interval 10 / 7 / 5 / 4 s and cap 40 / 50 / 60 / 70-80 by player count, 50 % real items, 10 % zombie backpacks, grenades in the random map loot. Classic = original numbers.
-- [x] **Zombies per wave scale with the players** (Timed only): x1 / x1.5 / x2 / x2.5 for 1-4 players, cap on zombies alive up to 80 (60 fps measured at 105 in headless Chrome).
+- [x] **Zombies per wave scale with the players** (Timed only): x1 / x1.5 / x2 / x2.5 for 1-4 players.
+- [x] **Zombies pile up, nothing dropped** (Timed only, after playtests): zombies over the alive cap wait in a host backlog and spawn 4/s with their own wave's stats when there is room; HUD "Zombies 64 (+20)"; crash-guard ceiling 300 alive (host + client ~30+ fps measured, docs/MULTIPLAYER.md table) and a host frame rate guard (below 25 fps for 3 s: spawning pauses above 50 alive). Relay host message budget raised to 15000/s for relay-only clients. Classic keeps the original 50 and drops the rest.
 
 ## Phase 5 — Community
 - [x] **Leaderboards** (Cloudflare D1, see docs/LEADERBOARD.md): best wave and most kills, Solo / Team, today (UTC) and all time; main menu > Leaderboard, a panel on the web page, the rank on the end-of-match screen. Multiplayer is recorded by the relay, single player with a signed start token + plausibility checks; default rules only.

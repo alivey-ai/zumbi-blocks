@@ -100,6 +100,82 @@ console.log("== Zombies per wave scale with the players (Timed), Classic unchang
   clearInterval(hc); await C.A.context().close(); await C.B.context().close();
 }
 
+console.log("== Zombie backlog (Timed): nothing dropped, spawns later with its wave's stats; Classic keeps the cap of 50");
+{
+  const tot = (d) => d.zombies + d.queued;
+  const hsum = (h) => Object.values(h || {}).reduce((a, b) => a + b, 0);
+  // solo, crash-guard ceiling lowered to 20 for the test: wave 1 = 15 alive
+  const S = await match("Back1", null, null, true);
+  const hs = setInterval(() => heal(S.A).catch(() => {}), 700);
+  await send(S.A, "DebugZmax", "20");
+  let d = await S.A.dump();
+  check("solo wave 1: 15 alive, nothing queued, cap 20", d.wave === 1 && d.zombies === 15 && d.queued === 0 && d.zcap === 20, J([d.wave, d.zombies, d.queued, d.zcap]));
+  await send(S.A, "DebugWaveClock", "119.5");
+  const w2 = await until(async () => { const x = await S.A.dump(); return x.wave === 2 ? x : null; }, 10000, 300);
+  check("wave 2 (16 zombies) with 15 alive and cap 20: 5 spawn, 11 queued (none dropped), the queued ones are wave 2", !!w2 && w2.zombies === 20 && w2.queued === 11 && w2.qwaves.every((w) => w === 2), J(w2 && [w2.zombies, w2.queued, w2.qwaves]));
+  await send(S.A, "DebugWaveClock", "119.5");
+  const w3 = await until(async () => { const x = await S.A.dump(); return x.wave === 3 ? x : null; }, 10000, 300);
+  check("wave 3 (17 more) all queued behind the wave 2 backlog: 20 alive + 28 queued = 15 + 16 + 17", !!w3 && w3.zombies === 20 && w3.queued === 28 && tot(w3) === 48 && w3.qwaves.filter((w) => w === 3).length === 17, J(w3 && [w3.zombies, w3.queued, w3.qwaves]));
+  await S.A.waitForTimeout(3000);
+  d = await S.A.dump();
+  check("backlog waits while the cap is full (wave 3 still running, nothing lost)", d.wave === 3 && d.zombies === 20 && d.queued === 28, J([d.wave, d.zombies, d.queued]));
+  await send(S.A, "DebugZmax", "200"); // room again: the backlog spawns a few per second
+  await S.A.waitForTimeout(2000);
+  const mid = await S.A.dump();
+  check("backlog spawns gradually (a few per second), not all at once", mid.queued > 0 && mid.queued < 28 && tot(mid) === 48, J([mid.zombies, mid.queued]));
+  const done = await until(async () => { const x = await S.A.dump(); return x.queued === 0 ? x : null; }, 15000, 500);
+  check("backlog empty: all 48 zombies alive", !!done && done.zombies === 48, J(done && [done.zombies, done.queued]));
+  await S.A.waitForTimeout(6000); // zombies that just rose from the ground (state -1) are not in the life histogram yet
+  const h = (await S.A.dump()).zhist || {}, ks = Object.keys(h).map(Number).sort((a, b) => a - b);
+  check("each queued zombie has its own wave's life: 15 / 16 / 17 zombies at base / +10 / +20", ks.length === 3 && h[ks[0]] === 15 && h[ks[1]] === 16 && h[ks[2]] === 17 && ks[1] - ks[0] === 10 && ks[2] - ks[0] === 20, J(h));
+  clearInterval(hs); await S.A.context().close();
+}
+{
+  // a wave is not "cleared" while zombies are queued: cap 2, wave 1 = 2 alive + 13 queued must stay wave 1 (the original rule: <= 3 left)
+  const A = await game(b, "A", BASE);
+  await send(A, "DebugZmax", "2");
+  await createRoom(A, BASE, "Back2");
+  await A.click_(640, 360); await A.keyboard.press("Enter");
+  const hs = setInterval(() => heal(A).catch(() => {}), 700);
+  await A.waitForTimeout(9000);
+  const d = await A.dump();
+  check("2 alive + 13 queued is not a cleared wave: still wave 1", d.wave === 1 && d.zombies === 2 && d.queued === 13, J([d.wave, d.zombies, d.queued]));
+  // frame rate guard (forced): no spawning once 50+ are alive, the backlog waits, then continues
+  await send(A, "DebugZmax", "200"); await send(A, "DebugZGuard", "1");
+  for (let i = 0; i < 4; i++) { await send(A, "DebugWaveClock", "119.5"); await A.waitForTimeout(2500); }
+  let g = await until(async () => { const x = await A.dump(); return x.zombies >= 50 ? x : null; }, 20000, 500) || await A.dump();
+  const q0 = g.queued;
+  await A.waitForTimeout(3000); g = await A.dump();
+  check("guard paused: spawning stops at 50 alive, the rest stays queued", g.guard === 1 && g.zombies === 50 && g.queued === q0 && q0 > 0 && g.zombies + g.queued === 15 + 16 + 17 + 18 + 19, J([g.guard, g.zombies, g.queued, q0]));
+  await send(A, "DebugZGuard", "-1");
+  const r = await until(async () => { const x = await A.dump(); return x.queued === 0 ? x : null; }, 25000, 500);
+  check("guard released: the backlog spawns, nothing lost (85 alive)", !!r && r.zombies === 85, J(r && [r.zombies, r.queued, r.guard]));
+  clearInterval(hs); await A.context().close();
+}
+{
+  // HUD on the client: alive + queued from the host
+  const { A, B } = await match("Back3");
+  const hb = setInterval(() => { heal(A).catch(() => {}); heal(B).catch(() => {}); }, 700);
+  await send(A, "DebugZmax", "20");
+  await send(A, "DebugWaveClock", "119.5");
+  await A.waitForTimeout(2500);
+  const da = await A.dump();
+  const db = await until(async () => { const x = await B.dump(); return x.mdqueued === da.queued && x.mdalive === da.zombies ? x : null; }, 5000, 400);
+  check("client HUD: 'Zombies N (+Q)' numbers equal the host's", da.queued > 0 && !!db, J([da.zombies, da.queued, db && db.mdalive, db && db.mdqueued]));
+  await A.shot("../../../docs/img/hud-zombies-queued.png");
+  clearInterval(hb); await A.context().close(); await B.context().close();
+}
+{
+  const C = await match("BackC", "classic", null, true);
+  const hc = setInterval(() => heal(C.A).catch(() => {}), 700);
+  let d = await C.A.dump();
+  check("Classic: the original cap of 50 alive, no backlog, no zombie HUD", d.zcap === 50 && d.queued === 0 && d.mdqueued === -1, J([d.zcap, d.queued, d.mdqueued]));
+  await send(C.A, "DebugWaveClock", "116");
+  const w2 = await until(async () => { const x = await C.A.dump(); return x.wave === 2 ? x : null; }, 10000, 300);
+  check("Classic wave 2: 31 alive, nothing queued", !!w2 && w2.zombies === 31 && w2.queued === 0, J(w2 && [w2.zombies, w2.queued]));
+  clearInterval(hc); await C.A.context().close();
+}
+
 console.log("== Loot: More (scales with the players, grenades) vs Classic");
 {
   const { A, B } = await match("Loot1");

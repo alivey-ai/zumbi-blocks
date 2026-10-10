@@ -634,16 +634,16 @@ public static partial class ZbNet
     {
         FlushFast();
         if (outLen == 0 || ZbWs.State() != 2) return;
-        // chunk on message boundaries so one frame stays well under the relay's 64 KB limit
+        // chunk on message boundaries so one frame stays well under the relay's 64 KB and 512 messages limits (hundreds of zombies alive)
         int o = 0;
         while (o < outLen)
         {
-            int start = o;
+            int start = o, n = 0;
             while (o + 2 <= outLen)
             {
                 int len = outBuf[o] | (outBuf[o + 1] << 8);
-                if (o - start + 2 + len > 60000 && o > start) break;
-                o += 2 + len;
+                if ((o - start + 2 + len > 60000 || n >= 400) && o > start) break;
+                o += 2 + len; n++;
             }
             var chunk = new byte[o - start];
             Buffer.BlockCopy(outBuf, start, chunk, 0, chunk.Length);
@@ -1197,6 +1197,11 @@ public class NetRunner : MonoBehaviour
             foreach (var z in zs) if (z.state != -1) nd = Mathf.Min(nd, Vector3.Distance(z.transform.position, p.transform.position));
             if (nd < float.MaxValue) sb.Append(",\"zdist\":").Append(Mathf.Round(nd * 10f) / 10f);
         }
+        { // zombies by life (rounded), e.g. {"100":15,"110":16}: a zombie's life is the wave's (base + 10 per wave), so this shows the waves present
+            var hist = new System.Collections.Generic.SortedDictionary<int, int>();
+            foreach (var z in zs) { var lf = z.GetComponent<sc_life>(); if (lf != null && z.state != -1) { int k = Mathf.RoundToInt(lf.quantia); hist[k] = (hist.TryGetValue(k, out var c) ? c : 0) + 1; } }
+            sb.Append(",\"zhist\":{"); bool hf = true; foreach (var kv in hist) { sb.Append(hf ? "" : ",").Append("\"").Append(kv.Key).Append("\":").Append(kv.Value); hf = false; } sb.Append("}");
+        }
         if (minLife < float.MaxValue) sb.Append(",\"zlifeMin\":").Append(Mathf.Round(minLife)).Append(",\"zlifeMax\":").Append(Mathf.Round(maxLife));
         var md = FindFirstObjectByType<sc_matchdata>();
         sb.Append(",\"killed\":").Append(md != null ? md.zombieskilled : -1);
@@ -1209,6 +1214,12 @@ public class NetRunner : MonoBehaviour
         foreach (var p in players) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) sb.Append(",\"hp\":").Append(Mathf.Round(lf.quantia)); }
         foreach (var p in players) { var nv = p.GetComponent<NetworkView>(); if (nv != null && nv.isMine && p.quant != null) sb.Append(",\"quant\":[").Append(string.Join(",", p.quant)).Append("],\"ammo\":[").Append(string.Join(",", p.ammo)).Append("],\"sel\":").Append(p.itemselected).Append(",\"lifes\":").Append(p.lifes); }
         { int k = -1; foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) k = sp.kills; } sb.Append(",\"kills\":").Append(k); }
+        if (mc != null) { // Timed waves backlog: queued zombies and the wave each belongs to (oldest first, at most 40 listed), cap, frame rate guard
+            sb.Append(",\"queued\":").Append(mc.zbacklog.Count).Append(",\"qwaves\":[");
+            int qi = 0; foreach (var qw in mc.zbacklog) { if (qi >= 40) break; sb.Append(qi > 0 ? "," : "").Append(qw); qi++; }
+            sb.Append("],\"zcap\":").Append(ZbMenu.ZombieCap(mc.zsmax, ZbMenu.Players())).Append(",\"guard\":").Append(ZbMenu.guardPaused ? 1 : 0).Append(",\"gfps\":").Append(Mathf.Round(ZbMenu.guardFps));
+        }
+        if (md != null) sb.Append(",\"mdalive\":").Append(md.zalive).Append(",\"mdqueued\":").Append(md.zqueued);
         if (mc != null) sb.Append(",\"started\":").Append(mc.gamestarted ? 1 : 0).Append(",\"min\":").Append(mc.minute).Append(",\"sec\":").Append(mc.second);
         sb.Append(",\"carry\":").Append(ZbCarry.Json());
         sb.Append("}");
@@ -1259,7 +1270,10 @@ public class NetRunner : MonoBehaviour
     // DebugGrab("grenadeground") picks up the nearest ground item whose name contains the text, like pressing E on it.
     public void DebugLoot(string a) { ZbMenu.MoreLoot(); ZbMenu.moreLoot = a != "classic"; }
     // DebugZmax("200") lifts the zombie cap of the running match (performance measurement only)
-    public void DebugZmax(string a) { var mc = FindFirstObjectByType<sc_matchcontroller>(); if (mc != null) mc.zsmax = int.Parse(a); }
+    // (Timed waves: the crash guard ceiling ZbMenu.zombieCeiling; Classic: the original zsmax). DebugZGuard("-1"|"0"|"1"): frame rate guard automatic /
+    // never pause / always pause (ZbMenu.guardForce).
+    public void DebugZmax(string a) { var mc = FindFirstObjectByType<sc_matchcontroller>(); if (mc != null) mc.zsmax = int.Parse(a); ZbMenu.zombieCeiling = int.Parse(a); }
+    public void DebugZGuard(string a) { ZbMenu.guardForce = int.Parse(a); if (ZbMenu.guardForce < 0) ZbMenu.guardPaused = false; }
     public void DebugLootNow(string a)
     {
         var mc = FindFirstObjectByType<sc_matchcontroller>(); if (mc == null) return;

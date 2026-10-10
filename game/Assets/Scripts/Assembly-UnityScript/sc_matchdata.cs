@@ -57,6 +57,11 @@ public class sc_matchdata : MonoBehaviour
 	// playtest features (not in v0.7): seconds until the next wave starts by itself (-1 = classic waves, no timer); set by the host, synced to everybody
 	public int waveleft = -1;
 
+	// playtest feature (Timed waves): zombies alive and queued in the host's backlog (HUD "Zombies 64 (+20)"); zqueued -1 = Classic / unknown
+	public int zalive;
+
+	public int zqueued = -1;
+
 	public sc_matchdata()
 	{
 		sendrate = 2f;
@@ -113,6 +118,10 @@ public class sc_matchdata : MonoBehaviour
 			{
 				((Component)this).NetView().RPC("sendstuff", (RPCMode)1, new object[5] { minutes, seconds, zombieskilled, isstarted, isended });
 				((Component)this).NetView().RPC("syncwavetimer", (RPCMode)1, new object[1] { waveleft });
+				if (zqueued >= 0)
+				{
+					((Component)this).NetView().RPC("synczombies", (RPCMode)1, new object[2] { zalive, zqueued });
+				}
 				dataconter -= 1000f;
 			}
 		}
@@ -160,7 +169,7 @@ public class sc_matchdata : MonoBehaviour
 		if (isstarted && waveleft > 0)
 		{
 			int wl = waveleft;
-			GUI.Label(new Rect((float)(Screen.width / 2 - 200), 34f, 400f, 40f), "Next wave in " + (wl / 60) + ":" + ((wl % 60 >= 10) ? (string.Empty + wl % 60) : ("0" + wl % 60)));
+			GUI.Label(new Rect((float)(Screen.width / 2 - 320), 34f, 640f, 40f), "Next wave in " + (wl / 60) + ":" + ((wl % 60 >= 10) ? (string.Empty + wl % 60) : ("0" + wl % 60)) + (zqueued >= 0 ? "   Zombies " + zalive + (zqueued > 0 ? " (+" + zqueued + ")" : string.Empty) : string.Empty));
 		}
 		GUI.skin = chatskin;
 		GUI.color = Color.white;
@@ -190,6 +199,13 @@ public class sc_matchdata : MonoBehaviour
 	public void syncwavetimer(int left)
 	{
 		waveleft = left;
+	}
+
+	[RPC]
+	public void synczombies(int alive, int queued)
+	{
+		zalive = alive;
+		zqueued = queued;
 	}
 
 	// playtest feature: every player sends its own health (the owner knows it best); ZbTeam shows it

@@ -39,8 +39,10 @@ const MAX_FRAME = 65536;
 // body length of the compact state messages by kind (C_STATE: op, kind, view i64, payload)
 const STATE_LEN = { 1: 24, 2: 38, 3: 22 };
 const MAX_MSGS_PER_FRAME = 512;
-// per socket message budget (messages per second, burst = 2 s): the host sends hundreds a second at 20 Hz state, a client far fewer
-const MSG_RATE_HOST = 3000, MSG_RATE_CLIENT = 600;
+// per socket message budget (messages per second, burst = 2 s): the host sends about 20 a second per zombie alive at 20 Hz state when a client
+// has no WebRTC lane (300 zombies: ~6500/s, measured with server/test/e2e/fps.mjs ?p2p=0), a client far fewer. Frames (what the Durable Object
+// is billed for) stay at ~20-60 a second whatever the count: the messages are batched per game frame.
+const MSG_RATE_HOST = 15000, MSG_RATE_CLIENT = 600;
 const MAX_BUFFER_ENTRIES = 20000;
 const MAX_BUFFER_PER_SENDER = 8000;
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024;

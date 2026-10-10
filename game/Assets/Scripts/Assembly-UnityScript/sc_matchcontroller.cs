@@ -108,6 +108,12 @@ public class sc_matchcontroller : MonoBehaviour
 
 	public Transform[] contructions;
 
+	// playtest feature (Timed waves): zombies of a wave that could not spawn yet (cap on zombies alive, or the frame rate guard), as the wave
+	// number each one belongs to, oldest first. Host only (the matchcontroller exists on the host alone). Classic never uses it.
+	public System.Collections.Generic.Queue<int> zbacklog = new System.Collections.Generic.Queue<int>();
+
+	public float zbacklogcont;
+
 	public sc_matchcontroller()
 	{
 		secstoincrease = 30;
@@ -376,6 +382,7 @@ public class sc_matchcontroller : MonoBehaviour
 
 	public void Start()
 	{
+		ZbMenu.GuardReset();
 		zspawnpoints = GameObject.FindGameObjectsWithTag("zombiespawn");
 		itemspawnpoints = GameObject.FindGameObjectsWithTag("itemspawn");
 		bagspawnpoints = GameObject.FindGameObjectsWithTag("bagspawn");
@@ -526,15 +533,21 @@ public class sc_matchcontroller : MonoBehaviour
 			// Timed waves (playtest feature, default; ZbMenu.TimedWaves()): the 120 s "long wave" timer of the original is armed for EVERY wave.
 			// The original arms it only if the previous wave was cleared (canlongwave) and disarms it after a timed-out wave. Classic = exactly that.
 			bool timedwaves = ZbMenu.TimedWaves();
+			if (timedwaves)
+			{
+				ZbMenu.GuardTick(Time.unscaledDeltaTime); // frame rate guard for zombie spawning (Timed waves only)
+			}
 			if (canlongwave || timedwaves)
 			{
 				longwaveconter += 1f * Time.deltaTime;
 			}
 			((sc_matchdata)(object)((Component)matchdata).GetComponent(typeof(sc_matchdata))).waveleft = timedwaves ? Mathf.Max(0, Mathf.CeilToInt(120f - longwaveconter)) : (-1);
 			zspawncont += 1f * Time.deltaTime;
-			if (zsinscene.Length <= 3 || !(longwaveconter <= 120f))
+			// Timed waves: a wave is only "cleared" when the backlog is empty too (zombies still queued count as zombies left)
+			int zleft = zsinscene.Length + (timedwaves ? zbacklog.Count : 0);
+			if (zleft <= 3 || !(longwaveconter <= 120f))
 			{
-				if (zsinscene.Length <= 3)
+				if (zleft <= 3)
 				{
 					canlongwave = true;
 				}
@@ -556,41 +569,50 @@ public class sc_matchcontroller : MonoBehaviour
 				}
 				int zcount = ZbMenu.WaveZombies(zminforwave + (wave - 1), ZbMenu.Players()); // Timed waves: scaled with the players in the match (Classic: unchanged)
 				int zcap = ZbMenu.ZombieCap(zsmax, ZbMenu.Players());
+				int zalive = zsinscene.Length;
 				for (num6 = 0; num6 < zcount; num6++)
 				{
-					if (zsinscene.Length < zcap)
+					if (zalive < zcap && (!timedwaves || (zbacklog.Count == 0 && !ZbMenu.SpawnBlocked(zalive))))
 					{
-						if (zspawnpoints.Length > 0)
-						{
-							num = Random.Range(0, zspawnpoints.Length);
-						}
-						num4 = zspawnpoints[num].transform.position.x + Random.Range(0f - zspawnpoints[num].transform.localScale.x / 2f, zspawnpoints[num].transform.localScale.x / 2f);
-						num5 = zspawnpoints[num].transform.position.z + Random.Range(0f - zspawnpoints[num].transform.localScale.z / 2f, zspawnpoints[num].transform.localScale.z / 2f);
-						val = (Transform)Network.Instantiate((Object)(object)zumbifab, new Vector3(num4, zspawnpoints[num].transform.position.y + 1.28f, num5), zumbifab.rotation, 5);
-						((Component)val).GetComponent<Rigidbody>().isKinematic = false;
-						((Behaviour)(sc_zumbionlinecontroller)(object)((Component)val).GetComponent(typeof(sc_zumbionlinecontroller))).enabled = false;
-						((Behaviour)(sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).enabled = true;
-						((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).gamecontrol = gamecontrol;
-						((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).matchcontrol = ((Component)this).transform;
-						((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).headlife = ((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).headlife + (float)(4 * (wave - 1));
-						((sc_life)(object)((Component)val).GetComponent(typeof(sc_life))).quantia = ((sc_life)(object)((Component)val).GetComponent(typeof(sc_life))).quantia + (float)(10 * (wave - 1));
-						((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).dmgmin = ((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).dmgmin + 0.5f * (float)(wave - 1);
-						((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).dmgmax = ((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).dmgmax + 0.5f * (float)(wave - 1);
-						((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).walkspeed = ((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).walkspeed + 0.06f * (float)(wave - 1);
-						if (!(((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).walkspeed <= 6f))
-						{
-							((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).walkspeed = 6f;
-						}
-						num2 = Random.Range(0, backpackprobmax);
-						if (num2 < backpackprobmin)
-						{
-							((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).carryitem = true;
-						}
-						Network.Instantiate((Object)(object)terra, new Vector3(val.position.x, val.position.y - 1.75f, val.position.z), val.rotation, 4);
-						zspawncont = 0f;
-						zsinscene = GameObject.FindGameObjectsWithTag("zumbi");
+						spawnzombie(wave);
+						zalive++;
+					}
+					else if (timedwaves)
+					{
+						zbacklog.Enqueue(wave); // Timed waves: never dropped, spawns later with this wave's stats (Classic: dropped, as the original)
 					}
 				}
+				zsinscene = GameObject.FindGameObjectsWithTag("zumbi");
+			}
+			// Timed waves: the backlog spawns ZBACKLOG_RATE zombies per second while there is room under the cap and the host's frame rate guard allows it
+			if (timedwaves && zbacklog.Count > 0)
+			{
+				zbacklogcont += Time.deltaTime * ZbMenu.ZBACKLOG_RATE;
+				int zcap2 = ZbMenu.ZombieCap(zsmax, ZbMenu.Players());
+				int zalive2 = zsinscene.Length;
+				bool spawned = false;
+				while (zbacklogcont >= 1f && zbacklog.Count > 0 && zalive2 < zcap2 && !ZbMenu.SpawnBlocked(zalive2))
+				{
+					zbacklogcont -= 1f;
+					spawnzombie(zbacklog.Dequeue());
+					zalive2++;
+					spawned = true;
+				}
+				if (zbacklogcont > 1f) zbacklogcont = 1f; // no burst after a pause
+				if (spawned) zsinscene = GameObject.FindGameObjectsWithTag("zumbi");
+			}
+			else
+			{
+				zbacklogcont = 0f;
+			}
+			if (timedwaves)
+			{
+				((sc_matchdata)(object)((Component)matchdata).GetComponent(typeof(sc_matchdata))).zalive = zsinscene.Length;
+				((sc_matchdata)(object)((Component)matchdata).GetComponent(typeof(sc_matchdata))).zqueued = zbacklog.Count;
+			}
+			else
+			{
+				((sc_matchdata)(object)((Component)matchdata).GetComponent(typeof(sc_matchdata))).zqueued = -1;
 			}
 			if (!gameended)
 			{
@@ -658,6 +680,45 @@ public class sc_matchcontroller : MonoBehaviour
 		((sc_matchdata)(object)((Component)matchdata).GetComponent(typeof(sc_matchdata))).minutes = minute;
 		((sc_matchdata)(object)((Component)matchdata).GetComponent(typeof(sc_matchdata))).seconds = second;
 		((sc_matchdata)(object)((Component)matchdata).GetComponent(typeof(sc_matchdata))).isstarted = gamestarted;
+	}
+
+	// One zombie at a random zombie spawn point with the stats of wave `zwave` (the original's per-wave hp / damage / speed). Timed waves call it
+	// later for backlog zombies with the wave they belonged to; the body is the original's wave-start spawn code unchanged.
+	public void spawnzombie(int zwave)
+	{
+		int num = 0;
+		int num2 = 0;
+		float num4 = 0f;
+		float num5 = 0f;
+		Transform val = null;
+		if (zspawnpoints.Length > 0)
+		{
+			num = Random.Range(0, zspawnpoints.Length);
+		}
+		num4 = zspawnpoints[num].transform.position.x + Random.Range(0f - zspawnpoints[num].transform.localScale.x / 2f, zspawnpoints[num].transform.localScale.x / 2f);
+		num5 = zspawnpoints[num].transform.position.z + Random.Range(0f - zspawnpoints[num].transform.localScale.z / 2f, zspawnpoints[num].transform.localScale.z / 2f);
+		val = (Transform)Network.Instantiate((Object)(object)zumbifab, new Vector3(num4, zspawnpoints[num].transform.position.y + 1.28f, num5), zumbifab.rotation, 5);
+		((Component)val).GetComponent<Rigidbody>().isKinematic = false;
+		((Behaviour)(sc_zumbionlinecontroller)(object)((Component)val).GetComponent(typeof(sc_zumbionlinecontroller))).enabled = false;
+		((Behaviour)(sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).enabled = true;
+		((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).gamecontrol = gamecontrol;
+		((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).matchcontrol = ((Component)this).transform;
+		((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).headlife = ((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).headlife + (float)(4 * (zwave - 1));
+		((sc_life)(object)((Component)val).GetComponent(typeof(sc_life))).quantia = ((sc_life)(object)((Component)val).GetComponent(typeof(sc_life))).quantia + (float)(10 * (zwave - 1));
+		((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).dmgmin = ((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).dmgmin + 0.5f * (float)(zwave - 1);
+		((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).dmgmax = ((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).dmgmax + 0.5f * (float)(zwave - 1);
+		((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).walkspeed = ((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).walkspeed + 0.06f * (float)(zwave - 1);
+		if (!(((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).walkspeed <= 6f))
+		{
+			((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).walkspeed = 6f;
+		}
+		num2 = Random.Range(0, backpackprobmax);
+		if (num2 < backpackprobmin)
+		{
+			((sc_zumbi)(object)((Component)val).GetComponent(typeof(sc_zumbi))).carryitem = true;
+		}
+		Network.Instantiate((Object)(object)terra, new Vector3(val.position.x, val.position.y - 1.75f, val.position.z), val.rotation, 4);
+		zspawncont = 0f;
 	}
 
 	public void Main()
