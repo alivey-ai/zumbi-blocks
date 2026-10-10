@@ -19,5 +19,9 @@
     ]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "Lobby"] }],
+  // Phase 5 leaderboards + game counts (docs/LEADERBOARD.md). Schema: server/migrations, apply with
+  //   npx wrangler d1 migrations apply zumbi-blocks --remote   (and --local for wrangler dev)
+  // The solo start token secret is a wrangler secret: npx wrangler secret put ZB_SECRET
+  "d1_databases": [{ "binding": "DB", "database_name": "zumbi-blocks", "database_id": "a7ec0cb0-c34a-4e20-a1ff-5f284b4f8c54", "migrations_dir": "migrations" }],
   "observability": { "enabled": true }
 }

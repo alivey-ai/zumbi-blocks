@@ -7,15 +7,17 @@
 //   * host states (S_HOST_STATE: away, hidden tab, restarting) and the host-bound queue while the host is away
 //   * "claim restart" (Level B): when the host is gone for good a remaining player claims the room code and the group continues in a new match
 import { DurableObject } from "cloudflare:workers";
+import { bumpStats, cleanName, implausible, recordRun, utcDay } from "./scores.js";
 
 // client -> relay
 const C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11,
-  C_META = 16, C_VIS = 17; // 12-15 reserved (phase 1/2); 18 C_SNAP and 19 C_ADOPTED are reserved for host migration level C (not built)
+  C_META = 16, C_VIS = 17, // 12-15 reserved (phase 1/2); 18 C_SNAP and 19 C_ADOPTED are reserved for host migration level C (not built)
+  C_SCORE = 20; // phase 5: host's per-player kills for the leaderboard
 // relay -> client
 const S_WELCOME = 0x81, S_RPC = 0x82, S_INST = 0x83, S_DESTROY = 0x84, S_CONNECTED = 0x85, S_DISCONNECTED = 0x86,
   S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d,
   S_SEQ = 0x8e, S_HOST_STATE = 0x8f, // phase 4; 0x90-0x94 reserved (host change / snapshot / roster, level C), unused
-  S_COUNTDOWN = 0x95;
+  S_COUNTDOWN = 0x95, S_RESULT = 0x96;
 // reject / close reasons
 export const R_NOT_FOUND = 1, R_BAD_PASSWORD = 2, R_FULL = 3, R_HOST_LEFT = 4, R_KICKED = 5, R_RATE = 6, R_PROTO = 7,
   R_REPLACED = 8, R_HOST_AWAY = 9, R_EXPIRED = 10;
@@ -96,6 +98,7 @@ export class Room extends DurableObject {
     this.rate = new WeakMap();
     this.msgRate = new WeakMap();
     this.dirty = false;
+    this.score = null; // phase 5: latest C_SCORE of the host {rules, wave, list: [[name, kills]]}
     ctx.blockConcurrencyWhile(async () => {
       this.meta = (await ctx.storage.get("meta")) || null;
       const snap = await ctx.storage.get("buf");
@@ -260,7 +263,8 @@ export class Room extends DurableObject {
     this.limbo.clear(); this.persistLimbo();
     this.pendingToHost = []; this.pendingBytes = 0; this.tomb = [];
     this.vis.clear(); this.bufOps.clear(); this.lastRtt.clear(); this.dcUp.clear();
-    Object.assign(m, { restart: null, nextId: 1, started: false, ended: false, wave: 0, alive: 0, bufGen: newToken().slice(0, 8) });
+    Object.assign(m, { restart: null, nextId: 1, started: false, ended: false, wave: 0, alive: 0, bufGen: newToken().slice(0, 8), startedAt: 0, recorded: false, score: null });
+    this.score = null;
     const ntok = newToken();
     server.serializeAttachment({ id: 0, host: true, ipid, rtc, v: 3, tok: ntok });
     this.players.set(0, server); this.wsInfo.set(server, { id: 0, v: 3 }); this.bufOps.set(0, 0); this.lastSeen.set(0, Date.now());
@@ -594,7 +598,11 @@ export class Room extends DurableObject {
         const wave = Math.min(9999, b[1] | (b[2] << 8)), flags = b[3] & 3, alive = b[4], cd = b.length === 6 ? Math.min(60, b[5]) : 0;
         const m = this.meta;
         const changed = m.wave !== wave || m.started !== !!(flags & 1) || m.ended !== !!(flags & 2) || m.alive !== alive;
+        const nowStarted = !m.started && (flags & 1), nowEnded = !m.ended && (flags & 2);
         Object.assign(m, { wave, started: !!(flags & 1), ended: !!(flags & 2), alive });
+        if (nowStarted) this.matchStarted();
+        if (changed && this.score) m.score = this.score; // the latest kills survive a Durable Object restart (written with the meta below)
+        if (nowEnded) this.recordMatch("ended");
         if (cd > 0 || this.cdOn) {
           // the host sends this every second while the countdown runs; tell everybody else (a late joiner gets the next tick)
           const out = new Uint8Array([S_COUNTDOWN, cd]);
@@ -602,6 +610,21 @@ export class Room extends DurableObject {
           this.cdOn = cd > 0;
         }
         if (changed) { this.ctx.storage.put("meta", m); this.lobbyUpdate(); }
+        return;
+      }
+      case C_SCORE: {
+        // phase 5, host only: u8 rules (1 Timed waves, 2 More loot), u16 wave, u8 n, n x (u16 kills, str8 name). Kept in memory, recorded at the end.
+        if (!att.host || b.length < 5) return;
+        const rules = b[1], n = Math.min(16, b[4]), list = [];
+        let o = 5;
+        for (let i = 0; i < n; i++) {
+          if (o + 3 > b.length) return;
+          const kills = b[o] | (b[o + 1] << 8), nl = b[o + 2];
+          if (o + 3 + nl > b.length) return;
+          list.push([dec.decode(b.subarray(o + 3, o + 3 + nl)), kills]);
+          o += 3 + nl;
+        }
+        this.score = { rules, wave: b[2] | (b[3] << 8), list };
         return;
       }
       case C_LISTING: {
@@ -740,6 +763,7 @@ export class Room extends DurableObject {
   // Host gone for good (clean leave, grace over, kicked by a flood): continue with a remaining player (level B) or close the room.
   hostGone() {
     if (!this.meta) return;
+    this.recordMatch("host left");
     const cands = [...this.players].filter(([id, w]) => id !== 0 && this.verOf(w) === 3);
     if (!cands.length) { this.closeRoom(R_HOST_LEFT); return; }
     // best candidate: visible tab first, then the lowest relay rtt, then the lowest id
@@ -805,6 +829,7 @@ export class Room extends DurableObject {
 
   async closeRoom(reason) {
     if (!this.meta) return;
+    this.recordMatch("closed");
     const code = this.meta.code, listed = this.meta.listed;
     const sockets = [...this.players.values()];
     this.meta = null; this.buf = []; this.byRoot.clear(); this.alive.clear(); this.players.clear(); this.limbo.clear(); this.dcUp.clear(); this.bytes = 0;
@@ -812,6 +837,42 @@ export class Room extends DurableObject {
     for (const w of sockets) { this.sendNow(w, [this.msg(S_REJECT, [reason])]); try { w.close(1000, "room closed"); } catch {} }
     try { await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll(); } catch {}
     if (listed) this.lobby().remove(code).catch(() => {});
+  }
+
+  // ---- phase 5: leaderboard + game counts (docs/LEADERBOARD.md) ------------------------------------------------------------------------
+  matchStarted() {
+    const m = this.meta;
+    m.startedAt = Date.now(); m.recorded = false; m.score = null; this.score = null;
+    this.ctx.waitUntil?.(bumpStats(this.env, utcDay(m.startedAt), "online", 1, 0, 0).catch((e) => console.log("stats error", String(e))));
+  }
+
+  // Once per match: when it ends (everybody dead), when the host leaves for good, or when the room closes. The wave and the start time are the
+  // relay's own (C_META, server clock); the names and kills come from the host's last C_SCORE. Only default rules (Timed waves + More loot) are ranked.
+  recordMatch(reason) {
+    const m = this.meta;
+    if (!m || !m.started || m.recorded || !m.startedAt) return;
+    m.recorded = true;
+    this.ctx.storage.put("meta", m);
+    const now = Date.now(), s = this.score || m.score, wave = m.wave | 0, elapsed = (now - m.startedAt) / 1000;
+    // a team keeps its size (an invalid name shows as "anon"); a lone player needs a valid name. At least one valid name is required.
+    const list = s && s.list.some(([n]) => cleanName(n)) ? s.list.map(([n, k]) => [cleanName(n) || (s.list.length >= 2 ? "anon" : null), k]).filter(([n]) => n) : [];
+    const players = s ? Math.max(1, s.list.length) : Math.max(1, this.players.size);
+    const env = this.env, id = `r:${m.code}:${m.startedAt}`;
+    const why = !s ? "no score" : (s.rules & 3) !== 3 ? "classic" : !list.length ? "names" : implausible({ wave, kills: list.reduce((a, p) => a + p[1], 0), elapsed, players });
+    const work = (async () => {
+      await bumpStats(env, utcDay(now), "online", 0, 1, players);
+      if (why) { console.log("match-not-ranked", JSON.stringify({ code: m.code, reason, why, wave, players, elapsed: Math.round(elapsed) })); this.sendResult(255, 0, 0); return; }
+      const res = await recordRun(env, { id, players: list, wave, secs: elapsed, source: "relay", now });
+      console.log("match-recorded", JSON.stringify({ code: m.code, reason, wave, players: list.length, ok: res.ok, today: res.today, all: res.all }));
+      if (res.ok) this.sendResult(res.mode === "team" ? 1 : 0, res.today, res.all);
+    })().catch((e) => console.log("record error", String(e)));
+    this.ctx.waitUntil?.(work);
+  }
+
+  // S_RESULT: u8 board (0 solo, 1 team, 255 not ranked), u16 rank today, u16 rank all time (wave board). Whoever is still connected gets it.
+  sendResult(board, today, all) {
+    const out = this.msg(S_RESULT, [board, today & 255, (today >> 8) & 255, all & 255, (all >> 8) & 255]);
+    for (const w of this.players.values()) this.sendNow(w, [out]);
   }
 
   lobby() { return this.env.LOBBY.get(this.env.LOBBY.idFromName("lobby")); }
