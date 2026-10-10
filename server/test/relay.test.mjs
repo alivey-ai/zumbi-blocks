@@ -21,9 +21,9 @@ const i32 = (op, p) => { const b = new Uint8Array(5); b[0] = op; new DataView(b.
 const listing = (listed, name) => { const n = enc.encode(name); return new Uint8Array([8, listed ? 1 : 0, n.length, ...n, 0]); };
 
 class Client {
-  constructor(path) {
+  constructor(path, headers) {
     this.msgs = []; this.frames = []; this.texts = []; this.waiters = []; this.closed = false;
-    this.ws = new WebSocket(`ws://${BASE}${path}`);
+    this.ws = new WebSocket(`ws://${BASE}${path}`, { headers: { "X-Zb-Test-Ip": `10.${(Math.random() * 250) | 0}.${(Math.random() * 250) | 0}.${(Math.random() * 250) | 0}`, ...(headers || {}) } });
     this.ws.binaryType = "arraybuffer";
     this.ws.on("message", (d, isBinary) => {
       if (isBinary === false) { try { this.texts.push(JSON.parse(Buffer.from(d).toString())); } catch { this.texts.push({ bad: true }); } this.pump(); return; }
@@ -384,6 +384,59 @@ await test("phase 3: /api/quickplay offers joinable rooms of the same build only
   assert.ok(r.body.every((x) => !x.pw && x.players < x.max && x.type === TY));
   assert.deepEqual((await api("/api/quickplay?type=nope")).body, []);
   for (const x of [one, three, full, pw, ended, other]) { x.h.close(); (x.cl || []).forEach((c) => c.close()); }
+});
+
+
+// ---- phase 4 step 1: rate and size limits (needs `wrangler dev --var ZB_TEST:1`: the test IP header is honoured only then) -----------
+const ipH = (ip) => ({ "X-Zb-Test-Ip": ip });
+await test("limits: /api/* is limited per IP (429 + retry-after), other IPs and ping are unaffected, normal list polling never trips", async () => {
+  const ip = "10.1.1." + (Math.random() * 200 | 0);
+  // a client with the list open: 1 list + 16 pings per 10 s = 100 requests a minute (ping has its own, larger bucket)
+  for (let i = 0; i < 100; i++) assert.equal((await fetch(`http://${BASE}/api/ping/ABCDE`, { headers: ipH(ip) })).status, 200);
+  let first429 = -1;
+  for (let i = 0; i < 260; i++) { const r = await fetch(`http://${BASE}/api/rooms`, { headers: ipH(ip) }); if (r.status === 429 && first429 < 0) { first429 = i; assert.ok(Number(r.headers.get("retry-after")) > 0); } }
+  assert.ok(first429 >= 200 && first429 <= 240, "limit kicks in around 240/min, got " + first429);
+  assert.equal((await fetch(`http://${BASE}/api/rooms`, { headers: ipH("10.7.7.7") })).status, 200, "other IP unaffected");
+  assert.equal((await fetch(`http://${BASE}/api/ping/ABCDE`, { headers: ipH(ip) })).status !== 429, true, "ping has its own bucket");
+});
+
+await test("limits: new rooms 20/min per IP (REJECT 6 on a normal socket), other IPs fine, joining from the same NAT is not affected", async () => {
+  const ip = "10.3.3." + (Math.random() * 200 | 0);
+  const hs = [];
+  for (let i = 0; i < 20; i++) { const h = new Client("/ws/host?v=2&max=3", ipH(ip)); await h.opened; await h.take(0x81); hs.push(h); }
+  const over = new Client("/ws/host?v=2&max=3", ipH(ip)); await over.opened;
+  assert.equal((await over.take(0x87))[1], 6);
+  const other = new Client("/ws/host?v=2&max=3", ipH("10.4.4.4")); await other.opened; await other.take(0x81);
+  // same NAT as the exhausted creator: joining an existing room uses another bucket
+  const r = new Client("/ws/room/ZZZZZ?v=2", ipH(ip)); await r.opened;
+  assert.equal((await r.take(0x87))[1], 1, "not rate limited, plain room-not-found");
+  r.close();
+  hs.push(other); hs.forEach((x) => x.close());
+});
+
+await test("limits: joins 90/min and rejoins 180/min are separate buckets", async () => {
+  const ip = "10.5.5." + (Math.random() * 200 | 0);
+  let limited = -1;
+  for (let i = 0; i < 100; i++) { const c = new Client("/ws/room/ZZZZZ?v=2", ipH(ip)); await c.opened; const r = await c.take(0x87); if (r[1] === 6 && limited < 0) limited = i; c.close(); }
+  assert.ok(limited >= 85 && limited <= 92, "join limit around 90, got " + limited);
+  const rj = new Client("/ws/room/ZZZZZ?v=2&rejoin=1.abcd", ipH(ip)); await rj.opened;
+  assert.notEqual((await rj.take(0x87))[1], 6, "rejoin bucket is not exhausted by first joins");
+  rj.close();
+});
+
+await test("limits: a flood of tiny messages is dropped, then the socket is closed; the host and other clients are unaffected", async () => {
+  const { h, code } = await host();
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code); await b.take(0x8a); await h.take(0x85);
+  const ping = new Uint8Array([7, 0, 0, 0, 0, 0]);
+  const burst = Array.from({ length: 500 }, () => ping);
+  for (let i = 0; i < 40 && !a.closed; i++) { try { a.send(...burst); } catch { break; } await sleep(5); }
+  const rej = await a.take(0x87, 4000); assert.equal(rej[1], 6);
+  await sleep(300);
+  assert.ok(a.closed, "flooder closed");
+  // normal client still works
+  b.send(rpc(0, SCENE(1), "hello")); await h.take(0x82);
+  [h, b].forEach((x) => x.close());
 });
 
 console.log(`${ok} tests passed`);

@@ -20,6 +20,8 @@ const MAX_FRAME = 65536;
 // body length of the compact state messages by kind (C_STATE: op, kind, view i64, payload)
 const STATE_LEN = { 1: 24, 2: 38, 3: 22 };
 const MAX_MSGS_PER_FRAME = 512;
+// per socket message budget (messages per second, burst = 2 s): the host sends hundreds a second at 20 Hz state, a client far fewer
+const MSG_RATE_HOST = 3000, MSG_RATE_CLIENT = 600;
 const MAX_BUFFER_ENTRIES = 20000;
 const MAX_BUFFER_PER_SENDER = 8000;
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
@@ -63,6 +65,7 @@ export class Room extends DurableObject {
     this.dcUp = new Set(); // ids of clients whose host->client state travels over their WebRTC data channel
     this.sigRate = new WeakMap();
     this.rate = new WeakMap();
+    this.msgRate = new WeakMap();
     this.dirty = false;
     ctx.blockConcurrencyWhile(async () => {
       this.meta = (await ctx.storage.get("meta")) || null;
@@ -188,6 +191,7 @@ export class Room extends DurableObject {
     while (o + 2 <= frame.length && count++ < MAX_MSGS_PER_FRAME) {
       const len = frame[o] | (frame[o + 1] << 8); o += 2;
       if (len < 1 || len > MAX_BODY || o + len > frame.length) break;
+      if (!this.takeMsg(ws, att)) { o += len; continue; } // over budget: skip the message (cheap), 100 in a row close the socket
       try { this.handle(ws, att, frame.subarray(o, o + len), emit, ctx); } catch (e) { console.log("handle error", String(e)); }
       o += len;
     }
@@ -255,6 +259,18 @@ export class Room extends DurableObject {
     r.tokens = Math.min(burst, r.tokens + ((now - r.t) / 1000) * rate); r.t = now;
     if (r.tokens < n) { if (++r.bad > 100) this.kick(ws, R_RATE, 1008); return false; }
     r.tokens -= n; r.bad = 0;
+    return true;
+  }
+
+  // message count bucket (next to the byte bucket): a flood of tiny messages costs CPU even when it is few bytes
+  takeMsg(ws, att) {
+    const now = Date.now();
+    const rate = att.host ? MSG_RATE_HOST : MSG_RATE_CLIENT, burst = rate * 2;
+    let m = this.msgRate.get(ws);
+    if (!m) { m = { tokens: burst, t: now, bad: 0 }; this.msgRate.set(ws, m); }
+    m.tokens = Math.min(burst, m.tokens + ((now - m.t) / 1000) * rate); m.t = now;
+    if (m.tokens < 1) { if (++m.bad > 100) this.kick(ws, R_RATE, 1008); return false; }
+    m.tokens -= 1; m.bad = 0;
     return true;
   }
 

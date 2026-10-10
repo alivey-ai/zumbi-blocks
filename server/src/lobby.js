@@ -7,10 +7,23 @@ export class Lobby extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.rooms = new Map();
+    this.hits = new Map(); // rate limit counters (memory only: losing them on a restart just resets the windows)
     ctx.blockConcurrencyWhile(async () => {
       const saved = await ctx.storage.get("rooms");
       if (saved) this.rooms = new Map(saved);
     });
+  }
+
+  // Fixed window counter used by the Worker for room creation and joins: true = allowed.
+  hit(key, limit, windowMs) {
+    const now = Date.now();
+    let r = this.hits.get(key);
+    if (!r || now - r.t0 >= windowMs) {
+      if (this.hits.size > 20000) for (const [k, v] of this.hits) if (now - v.t0 >= 3_600_000) this.hits.delete(k);
+      if (this.hits.size > 50000) this.hits.clear();
+      r = { t0: now, n: 0 }; this.hits.set(key, r);
+    }
+    return ++r.n <= limit;
   }
 
   prune() {

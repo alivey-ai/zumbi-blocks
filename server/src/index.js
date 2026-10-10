@@ -12,12 +12,57 @@ function newCode() {
   return s;
 }
 
+// ---- rate limits (free plan friendly: counters live in memory / in the Lobby DO, nothing paid) --------------------------------
+// Sized for NATs (a school or hackathon: dozens of players behind one IP) and reconnect storms (a Wi-Fi blip makes all of them retry
+// at once): the limits are per IP and per minute, rejoins have their own, larger bucket. See docs/MULTIPLAYER.md "Limits".
+//   /api/rooms, /api/room, /api/quickplay   240/min   (in this isolate: a request must not cost a Durable Object call just to be refused)
+//   /api/ping                               600/min   (the server list probes up to 8 rows twice per 10 s per open list)
+//   new rooms (/ws/host)                     20/min and 200/hour   (Lobby DO counter, shared by all isolates)
+//   first joins (/ws/room)                   90/min
+//   rejoins (/ws/room?rejoin=)              180/min
+// A refused WebSocket upgrade is answered with a normal socket that carries REJECT(6) and closes, because a browser cannot read the
+// status code of a failed upgrade; the client treats reason 6 as "retry later".
+export const LIMITS = {
+  api: [240, 60_000], ping: [600, 60_000], create: [20, 60_000], createHour: [200, 3_600_000], join: [90, 60_000], rejoin: [180, 60_000],
+};
+const local = new Map();
+function localHit(key, limit, win) {
+  const now = Date.now();
+  let r = local.get(key);
+  if (!r || now - r.t0 >= win) {
+    if (local.size > 5000) for (const [k, v] of local) if (now - v.t0 >= 120_000) local.delete(k);
+    if (local.size > 20000) local.clear();
+    r = { t0: now, n: 0 }; local.set(key, r);
+  }
+  return ++r.n <= limit;
+}
+function clientIp(request, env) {
+  // X-Zb-Test-Ip is honoured only when the worker runs with --var ZB_TEST:1 (local tests), never in production.
+  if (env.ZB_TEST) { const t = request.headers.get("X-Zb-Test-Ip"); if (t) return t; }
+  return request.headers.get("CF-Connecting-IP") || "0.0.0.0";
+}
+const tooMany = (win) => Response.json({ error: "rate limited" }, { status: 429, headers: { "cache-control": "no-store", "retry-after": String(Math.ceil(win / 1000)) } });
+function rejectSocket(reason) {
+  const pair = new WebSocketPair();
+  const [client, server] = Object.values(pair);
+  server.accept();
+  server.send(new Uint8Array([2, 0, 0x87, reason]));
+  server.close(1008, "rate limited");
+  return new Response(null, { status: 101, webSocket: client });
+}
+
 const TYPES = { ".wasm": "application/wasm", ".js": "application/javascript", ".data": "application/octet-stream", ".json": "application/json" };
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if (path.startsWith("/api/")) {
+      const ip = clientIp(request, env);
+      const [lim, win] = path.startsWith("/api/ping/") ? LIMITS.ping : LIMITS.api;
+      if (!localHit((path.startsWith("/api/ping/") ? "p:" : "a:") + ip, lim, win)) return tooMany(win);
+    }
 
     if (path === "/api/rooms") {
       const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
@@ -43,7 +88,13 @@ export default {
 
     if (path === "/ws/host" || path.startsWith("/ws/room/")) {
       if (request.headers.get("Upgrade") !== "websocket") return new Response("Expected WebSocket", { status: 426 });
-      const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
+      const ip = clientIp(request, env);
+      const rejoin = path.startsWith("/ws/room/") && url.searchParams.has("rejoin");
+      const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
+      const allow = async (key, [lim, win]) => { try { return await lobby.hit(key, lim, win); } catch { return true; } }; // fail open
+      if (path === "/ws/host") {
+        if (!(await allow("c:" + ip, LIMITS.create)) || !(await allow("ch:" + ip, LIMITS.createHour))) return rejectSocket(6);
+      } else if (!(await allow((rejoin ? "r:" : "j:") + ip, rejoin ? LIMITS.rejoin : LIMITS.join))) return rejectSocket(6);
       const fwd = (code, host) => {
         const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
         const u = new URL(request.url);
