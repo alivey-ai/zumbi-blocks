@@ -43,3 +43,34 @@ export async function game(b, name, base = "http://localhost:8787/", opts = {}) 
   p.shot = async (f) => { await p.locator("#unity-canvas").screenshot({ path: f }); };
   return p;
 }
+
+// ---- phase 4 helpers (same click paths as e2e.mjs) -------------------------------------------------------------------------------
+// A creates a listed room (the original menu: Play > Create server > name > Start); resolves with the room code from /api/rooms.
+export async function createRoom(A, base, name = "P4 Room") {
+  await A.click_(750, 281); await A.click_(750, 331);
+  await A.click_(850, 185); await A.keyboard.type(name, { delay: 30 });
+  await A.click_(750, 331); await A.click_(750, 481);
+  await A.waitForTimeout(5000);
+  const rooms = await (await fetch(new URL("/api/rooms", base))).json();
+  if (!rooms.some((x) => x.name === name)) console.log("createRoom: rooms are", JSON.stringify(rooms.map((x) => [x.code, x.name, x.age])));
+  const r = rooms.filter((x) => x.name === name).sort((a, b) => a.age - b.age)[0]; // newest (older runs may linger for a while)
+  return r ? r.code : null;
+}
+// B joins the first room of the server list.
+export async function joinFromList(B) {
+  await B.click_(750, 281); await B.click_(750, 381); await B.waitForTimeout(1500);
+  await B.click_(400, 45); await B.click_(750, 561); await B.waitForTimeout(5000);
+}
+// join by room code (Direct IP)
+export async function joinByCode(C, code) {
+  await C.click_(750, 281); await C.click_(750, 431); await C.waitForTimeout(800);
+  await C.click_(850, 265); await C.keyboard.press("Control+a"); await C.keyboard.type(code, { delay: 30 }); await C.waitForTimeout(300);
+  await C.click_(750, 431); await C.waitForTimeout(5000);
+}
+export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// wait until fn() (async) is truthy, polling every 300 ms
+export async function until(fn, ms = 15000, step = 300) { const t0 = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t0 > ms) return v; await sleep(step); } }
+// kill the page's WebSocket the way a network drop does (no clean close code: the relay sees 4000 and keeps the slot in limbo)
+export const dropSocket = (p) => p.evaluate(() => { const s = window.__zbws; if (s && s.ws) s.ws.close(4000, "test drop"); });
+
+export const heal = (p) => p.evaluate(() => window.unityInstance.SendMessage("ZbNetRunner", "DebugHeal", ""));

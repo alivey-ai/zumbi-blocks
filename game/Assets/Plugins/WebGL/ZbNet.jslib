@@ -4,21 +4,40 @@
 // receives is delayed by RTT/2 plus a random +-JITTER/2 (so this browser's round trip to the relay grows by RTT, +-JITTER),
 // in order like TCP (a late message holds back the ones behind it). 0 or missing = off.
 mergeInto(LibraryManager.library, {
-  ZbWsOpen: function (pathPtr) {
+  // resume = 1: the same session takes its slot back after a drop (phase 4). The WebRTC lane (zbrtc.js) is left alone then: a data channel
+  // does not depend on the WebSocket and usually survives it; the relay's new "hello" lets it re-announce itself.
+  ZbWsOpen: function (pathPtr, resume) {
     var path = UTF8ToString(pathPtr);
     var s = (window.__zbws = window.__zbws || {});
-    if (s.ws) { try { s.ws.onclose = null; s.ws.close(); } catch (e) {} }
+    if (s.ws) { try { s.ws.onclose = null; s.ws.close(1000, 'bye'); } catch (e) {} }
+    // Tab visibility goes to the relay as a complete frame straight on the socket (C_VIS = 17: u8 visible, u8 fps, u16 rtt), because the game
+    // does not run while the tab is hidden. The relay never drops a hidden player for silence, and tells everybody when the HOST is hidden.
+    var visFrame = function () { return new Uint8Array([5, 0, 17, document.visibilityState === 'visible' ? 1 : 0, 0, 0, 0]); };
+    if (!s.visHooked) {
+      s.visHooked = true;
+      document.addEventListener('visibilitychange', function () { var w = s.ws; if (w && w.readyState === 1) { try { w.send(visFrame()); } catch (e) {} } });
+    }
+    // while hidden nobody drains the receive queue: drop frames that only carry lossy data (state, echo, pong, unbuffered rpc); buffered ones are kept
+    var lossy = function (d) {
+      var o = 0;
+      while (o + 2 <= d.length) {
+        var len = d[o] | (d[o + 1] << 8); o += 2; var op = d[o];
+        if (!(op === 0x8b || op === 0x8d || op === 0x8c || op === 0x88 || op === 0x89 || op === 0x95 || (op === 0x82 && len > 5 && (d[o + 5] === 1 || d[o + 5] === 2)))) return false;
+        o += len;
+      }
+      return true;
+    };
     s.queue = []; s.state = 1; s.err = 0; s.lastArrival = 0; s.pendingOut = 0; s.closed = false;
     s.lastSendAt = 0; s.lastRecvAt = 0;
     var ns = (/[?&]netsim=([0-9.]+)(?:,([0-9.]+))?/.exec(location.search) || []);
     s.simD = (parseFloat(ns[1]) || 0) / 2; s.simJ = (parseFloat(ns[2]) || 0) / 2;
     s.sim = s.simD > 0 || s.simJ > 0;
-    if (window.zbrtc) { try { window.zbrtc.attach(s); } catch (e) {} }
+    if (window.zbrtc && !resume) { try { window.zbrtc.attach(s); } catch (e) {} }
     var base = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
     var ws;
     try { ws = new WebSocket(base + path); } catch (e) { s.state = 3; s.ws = null; return; }
     ws.binaryType = 'arraybuffer';
-    ws.onopen = function () { if (s.ws === ws) s.state = 2; };
+    ws.onopen = function () { if (s.ws === ws) { s.state = 2; if (document.visibilityState !== 'visible') { try { ws.send(visFrame()); } catch (e) {} } } };
     ws.onmessage = function (e) {
       if (s.ws !== ws) return;
       if (typeof e.data === 'string') { if (window.zbrtc) window.zbrtc.onText(e.data); return; } // WebRTC signaling (zbrtc.js)
@@ -29,7 +48,9 @@ mergeInto(LibraryManager.library, {
         at = Math.max(s.lastRecvAt, now + Math.max(0, s.simD + (Math.random() * 2 - 1) * s.simJ));
         s.lastRecvAt = at;
       }
-      s.queue.push({ t: at, d: new Uint8Array(e.data) });
+      var arr = new Uint8Array(e.data);
+      if (document.visibilityState !== 'visible' && s.queue.length > 600 && lossy(arr)) return;
+      s.queue.push({ t: at, d: arr });
     };
     ws.onclose = function () { if (s.ws === ws) { s.closed = true; if (s.state !== 2 || !s.queue.length) s.state = 3; } };
     ws.onerror = function () { if (s.ws === ws) s.err = 1; };
@@ -90,7 +111,7 @@ mergeInto(LibraryManager.library, {
     var s = window.__zbws;
     if (!s) return;
     if (window.zbrtc) { try { window.zbrtc.detach(); } catch (e) {} }
-    if (s.ws) { try { s.ws.onclose = null; s.ws.close(); } catch (e) {} }
+    if (s.ws) { try { s.ws.onclose = null; s.ws.close(1000, 'bye'); } catch (e) {} } // 1000: an intentional leave, the relay frees the slot at once
     s.ws = null; s.state = 0; s.queue = []; s.closed = false; s.pendingOut = 0;
   },
   // ---- WebRTC fast lane (zbrtc.js in the page template): host->client state and echo probes. All polled, no callbacks. ----
@@ -102,6 +123,14 @@ mergeInto(LibraryManager.library, {
   ZbRtcLastArrival: function () { return window.zbrtc ? window.zbrtc.lastArrival : 0; },
   ZbRtcClosePeer: function (id) { if (window.zbrtc) window.zbrtc.closePeer(id); },
   ZbRtcStat: function (id, which) { return window.zbrtc ? window.zbrtc.stat(id, which) : 0; },
+  // Resume token of this tab ("CODE.ID.TOKEN") in sessionStorage: a reloaded tab can free the slot its previous incarnation left in limbo.
+  ZbResumeStore: function (ptr) {
+    try { var v = UTF8ToString(ptr); if (v) sessionStorage.setItem('zb.resume', v); else sessionStorage.removeItem('zb.resume'); } catch (e) {}
+  },
+  ZbResumeLoad: function () {
+    var v = ''; try { v = sessionStorage.getItem('zb.resume') || ''; } catch (e) {}
+    var n = lengthBytesUTF8(v) + 1; var p = _malloc(n); stringToUTF8(v, p, n); return p;
+  },
   ZbOrigin: function () {
     var o = location.origin;
     var n = lengthBytesUTF8(o) + 1;

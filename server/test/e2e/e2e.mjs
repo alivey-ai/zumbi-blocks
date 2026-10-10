@@ -158,15 +158,14 @@ check("B left via in-game Disconnect (offline, back in menu)", db.mode === "offl
 check("host dropped B (remote count and avatar)", da.remote === 1 && da.players.every((p) => p.owner !== 1), J([da.remote, da.players.map((p) => p.owner)]));
 await B.shot("b_after_disconnect.png");
 
-// --- host leaves via in-game Disconnect ---
-await A.keyboard.press("Escape"); await A.waitForTimeout(800); await A.click_(640, 412); await A.waitForTimeout(500); await A.click_(585, 377); await D.waitForTimeout(4000);
+// --- host leaves via in-game Disconnect (phase 4: the remaining player takes over the room, "claim restart") ---
+await A.keyboard.press("Escape"); await A.waitForTimeout(800); await A.click_(640, 412); await A.waitForTimeout(500); await A.click_(585, 377); await D.waitForTimeout(7000);
 dd = await D.dump(); da = await A.dump();
 check("host is offline after Disconnect", da.mode === "offline", J(da));
-check("remaining client is disconnected when host leaves", dd.mode === "offline", J(dd));
+check("remaining client takes over: host of the same room code, in a fresh match (claim restart; see host.mjs for the full flow)", dd.mode === "host" && dd.code === code, J(dd));
 await D.shot("d_after_host_left.png");
-await D.waitForTimeout(500);
 const after = await (await fetch(new URL("/api/rooms", BASE))).json();
-check("room removed from the list", after.length === 0, J(after));
+check("room stays in the list under the same code, hosted by D", after.length === 1 && after[0].code === code && after[0].players === 1, J(after));
 
 console.log(`${pass} passed, ${fail} failed`);
 await Promise.race([b.close(), new Promise((r) => setTimeout(r, 3000))]);

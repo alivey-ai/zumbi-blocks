@@ -722,6 +722,7 @@ public class sc_gamecontrol : MonoBehaviour
 			lastaccmoney = 0;
 			errormsg = "Either you lost connection or the server shuted down";
 		}
+		ZbMenu.HostLeftBank(this); // phase 4: the host left (not a lost connection): bank this match's money like the ESC Disconnect does
 		if (gamestate != 12)
 		{
 			gamestate = 8;
@@ -730,6 +731,7 @@ public class sc_gamecontrol : MonoBehaviour
 		cam.localPosition = Vector3.zero;
 		cam.localEulerAngles = Vector3.zero;
 		Application.LoadLevel(2);
+		ZbMenu.HostLeftScreen(this); // phase 4: "host left" screen, the group continues in a new match (claim restart)
 	}
 
 	public void OnConnectedToServer()

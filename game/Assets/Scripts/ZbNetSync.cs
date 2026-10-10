@@ -16,6 +16,7 @@ using UnityEngine;
 public static class ZbCfg
 {
     public static bool interp = true, compact = true, statsOn;
+    public static bool resume = true;      // ?resume=0: no reconnect (a dropped socket ends the session as before phase 4)
     public static bool p2p = true;         // ?p2p=0 turns the WebRTC fast lane off (kill switch); "drop" / "block" are test hooks handled in zbrtc.js
     public static string p2pMode = "";
     public static float rate = 30f;        // value for sc_player.sendrate / sc_zumbi.sendrate (the original used 10 = 8..10 updates/s)
@@ -43,6 +44,7 @@ public static class ZbCfg
                 case "delay": if (float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out f)) minDelay = f; break;
                 case "stats": statsOn = v == "1"; break;
                 case "p2p": p2pMode = v; p2p = v != "0"; break;
+                case "resume": resume = v != "0"; break;
             }
         }
     }

@@ -16,7 +16,9 @@ using UnityEngine.Networking;
 static class ZbWs
 {
 #if UNITY_WEBGL && !UNITY_EDITOR
-    [DllImport("__Internal")] static extern void ZbWsOpen(string path);
+    [DllImport("__Internal")] static extern void ZbWsOpen(string path, int resume);
+    [DllImport("__Internal")] static extern void ZbResumeStore(string v);
+    [DllImport("__Internal")] static extern IntPtr ZbResumeLoad();
     [DllImport("__Internal")] static extern int ZbWsState();
     [DllImport("__Internal")] static extern int ZbWsSend(byte[] data, int len);
     [DllImport("__Internal")] static extern int ZbWsRecv(byte[] buf, int cap);
@@ -31,7 +33,9 @@ static class ZbWs
     [DllImport("__Internal")] static extern void ZbClearInvite();
     public static void SetRoomUi(string code, bool hosting) { ZbSetRoomUi(code ?? "", hosting ? 1 : 0); }
     public static void ClearInviteParam() { ZbClearInvite(); }
-    public static void Open(string path) { ZbWsOpen(path); }
+    public static void Open(string path, bool resume = false) { ZbWsOpen(path, resume ? 1 : 0); }
+    public static void StoreResume(string v) { ZbResumeStore(v ?? ""); }
+    public static string LoadResume() { return Marshal.PtrToStringUTF8(ZbResumeLoad()); }
     public static int State() { return ZbWsState(); }
     public static bool Send(byte[] d, int len) { return ZbWsSend(d, len) == 1; }
     public static int Recv(byte[] b) { return ZbWsRecv(b, b.Length); }
@@ -45,7 +49,9 @@ static class ZbWs
 #else
     public static void SetRoomUi(string code, bool hosting) { }
     public static void ClearInviteParam() { }
-    public static void Open(string path) { }
+    public static void Open(string path, bool resume = false) { }
+    public static void StoreResume(string v) { }
+    public static string LoadResume() { return ""; }
     public static int State() { return 3; }
     public static bool Send(byte[] d, int len) { return false; }
     public static int Recv(byte[] b) { return 0; }
@@ -114,13 +120,13 @@ public class NetIdentity : MonoBehaviour
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-public static class ZbNet
+public static partial class ZbNet
 {
     // wire opcodes
-    const byte C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11, C_META = 16;
+    const byte C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11, C_META = 16, C_VIS = 17;
     const byte S_WELCOME = 0x81, S_RPC = 0x82, S_INST = 0x83, S_DESTROY = 0x84, S_CONNECTED = 0x85, S_DISCONNECTED = 0x86,
-        S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d, S_COUNTDOWN = 0x95;
-    const int PROTO = 2;
+        S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d, S_SEQ = 0x8e, S_HOST_STATE = 0x8f, S_COUNTDOWN = 0x95;
+    const int PROTO = 3;
     public const long SCENE_BASE = 1L << 51;
     const long OWNER_UNIT = 1L << 40;
 
@@ -181,20 +187,21 @@ public static class ZbNet
     // ---- connection lifecycle (called by Network / MasterServer shims) -----------------------
     public static void StartHost(int maxPlayers, string password)
     {
-        ZbCfg.Load(); EnsureRunner(); ResetSession();
+        ZbCfg.Load(); EnsureRunner(); ResetSession(); lastEndReason = 0;
         mode = Mode.HostConnecting; localId = 0; synced = true;
         hostPassword = password ?? "";
         playerIp[0] = "127.0.0.1";
         string path = "/ws/host?v=" + PROTO + "&max=" + maxPlayers + "&name=" + Uri.EscapeDataString(roomName.Length > 0 ? roomName : "Zumbi room")
             + "&pw=" + Uri.EscapeDataString(hostPassword) + "&type=" + Uri.EscapeDataString(hostType) + (ZbCfg.p2p ? "&rtc=1" : "");
+        if (claimCode.Length > 0) { path += "&claim=" + Uri.EscapeDataString(claimCode); claimCode = ""; } // level B: take over a room whose host left
         ZbWs.Open(path);
     }
 
     public static void StartClient(string code, string password)
     {
-        ZbCfg.Load(); EnsureRunner(); ResetSession();
+        ZbCfg.Load(); EnsureRunner(); ResetSession(); lastEndReason = 0;
         mode = Mode.ClientConnecting;
-        ZbWs.Open("/ws/room/" + Uri.EscapeDataString(code) + "?v=" + PROTO + "&pw=" + Uri.EscapeDataString(password ?? "") + (ZbCfg.p2p ? "&rtc=1" : ""));
+        ZbWs.Open("/ws/room/" + Uri.EscapeDataString(code) + "?v=" + PROTO + "&pw=" + Uri.EscapeDataString(password ?? "") + (ZbCfg.p2p ? "&rtc=1" : "") + StaleParam(code));
     }
 
     public static void Register(string gameType, string name, string comment)
@@ -225,8 +232,10 @@ public static class ZbNet
     public static void Shutdown()
     {
         FlushOut();
-        ZbWs.Close();
+        ZbWs.Close(); // closes with 1000: an intentional leave, the relay frees the slot at once
+        ZbWs.StoreResume("");
         ResetSession();
+        lastEndReason = 0;
     }
 
     static void ResetSession()
@@ -236,6 +245,7 @@ public static class ZbNet
         mode = Mode.Offline; synced = false; remoteCount = 0; roomCode = ""; counter = 0; localId = 0;
         outLen = 0; playerIp.Clear(); playerPing.Clear(); pendingRpcs.Clear(); myPing = 0; ZbSync.Reset(); nextEcho = 0;
         fastLen = 0; fastAny = fastAll = false; parked.Clear(); laneUp.Clear(); ctxViaDc = false;
+        ResetResume();
     }
 
     // ---- ids ---------------------------------------------------------------------------------
@@ -485,6 +495,13 @@ public static class ZbNet
 
     static void Queue()
     {
+        NoteBuffered(); // buffered ops are counted and remembered for the resend after a reconnect
+        if (reconnecting) return; // the socket is gone: unbuffered messages are simply lost, buffered ones wait in the ring
+        QueueOut();
+    }
+
+    static void QueueOut()
+    {
         // Phase 2: host state goes to the peers whose data channel is up. When every peer is on the channel the WebSocket copy is
         // skipped altogether (that is what takes the traffic off the Durable Object); otherwise the relay skips the flagged peers.
         if (fastAny && w.b[0] == C_STATE)
@@ -632,19 +649,12 @@ public static class ZbNet
         if (mode == Mode.Offline) return;
 
         int st = ZbWs.State();
+        if (reconnecting) { TickReconnect(st); return; }
         if (st == 3) { OnSocketClosed(); return; }
         if (st == 2)
         {
             if (mode == Mode.HostConnecting) { /* wait for WELCOME */ }
-            for (int guard = 0; guard < 256; guard++)
-            {
-                int n = ZbWs.Recv(rx);
-                if (n == 0) break;
-                if (n < 0) { Debug.LogWarning("[zbnet] oversized frame dropped"); continue; }
-                ZbSync.rxFrames++; ZbSync.rxBytes += n + 2;
-                ZbSync.ctxArrival = ZbWs.LastArrival();
-                if (!ProcessFrame(n)) return; // yield to the game for a frame (e.g. after WELCOME) or session ended
-            }
+            if (!ReadFrames()) return; // yield to the game for a frame (e.g. after WELCOME) or session ended
             if (ZbCfg.p2p) DrainDc();
             if (Connected && Time.unscaledTime >= nextPing)
             {
@@ -663,6 +673,21 @@ public static class ZbNet
         RetryPending();
         RetryParked();
         UpdateLanes();
+    }
+
+    // Reads the frames that arrived on the WebSocket. Returns false when the caller should stop for this frame (after WELCOME / session end).
+    static bool ReadFrames()
+    {
+        for (int guard = 0; guard < 256; guard++)
+        {
+            int n = ZbWs.Recv(rx);
+            if (n == 0) break;
+            if (n < 0) { Debug.LogWarning("[zbnet] oversized frame dropped"); continue; }
+            ZbSync.rxFrames++; ZbSync.rxBytes += n + 2;
+            ZbSync.ctxArrival = ZbWs.LastArrival();
+            if (!ProcessFrame(n)) return false;
+        }
+        return true;
     }
 
     // Frames that arrived over the data channel: only S_TIME, S_STATE and S_ECHO are accepted, and the sender is the peer the channel
@@ -733,7 +758,9 @@ public static class ZbNet
             case S_WELCOME:
             {
                 localId = r.I32(); bool isHost = r.U8() == 1; int max = r.U8(); roomCode = r.Str8();
+                if (!ReadWelcomeExt(r)) { /* protocol 2 relay: no resume */ }
                 ZbWs.SetRoomUi(roomCode, isHost);
+                if (welcomeResumed) { welcomeResumed = false; OnResumed(); return true; } // same session: NOT a new connection (no OnConnectedToServer)
                 if (isHost) { mode = Mode.Host; if (hostListed) SendListing(); Notify("OnServerInitialized"); return true; }
                 mode = Mode.Client; Network.peerType = NetworkPeerType.Client;
                 Notify("OnConnectedToServer");
@@ -750,6 +777,7 @@ public static class ZbNet
                 int sender = r.I32(); r.U8(); long view = r.I64(); int idx = r.U16(); var pos = r.Vec3(); var rot = r.Quat();
                 LoadTable();
                 if (table == null || idx >= table.prefabs.Length || table.prefabs[idx] == null) { Debug.LogError("[zbnet] unknown prefab index " + idx); break; }
+                { GameObject have; if (roots.TryGetValue(view, out have) && have != null) break; } // already there (a resume can repeat an instantiate)
                 InstantiateNet(table.prefabs[idx], pos, rot, view, sender);
                 break;
             }
@@ -792,6 +820,12 @@ public static class ZbNet
             }
             case S_SYNC_DONE:
                 synced = true;
+                break;
+            case S_SEQ: // phase 4: newest buffered entry this peer has processed (what a resume asks the relay to continue from)
+                lastSeq = (uint)r.I32();
+                break;
+            case S_HOST_STATE: // phase 4: 0 ok, 1 host connection lost (grace), 2 host's tab is hidden, 3 host left, a new match is being set up
+                OnHostState(r.U8(), r.U8());
                 break;
             case S_COUNTDOWN: // phase 3: Quick Play room auto start, seconds left (0 = cancelled / started)
                 ZbMenu.OnCountdown(r.U8());
@@ -897,10 +931,13 @@ public static class ZbNet
     static void OnReject(int reason)
     {
         var m = mode;
+        if (reconnecting && (reason == 6 || reason == 9)) { ZbWs.Close(); resumeSent = false; nextAttempt = Time.unscaledTime + 1.5f; return; } // rate limited / host away: try again
+        RememberSession(reason); // for the "host left" screen and the claim restart: ResetSession wipes the id and the token
         ZbWs.Close(); // we got the reason; the socket close that follows is expected
         bool wasHandshake = m == Mode.ClientConnecting || m == Mode.HostConnecting;
         Network.peerType = NetworkPeerType.Disconnected;
         mode = Mode.Offline; ResetSession();
+        lastEndReason = reason;
         if (wasHandshake)
         {
             var err = NetworkConnectionError.ConnectionFailed;
@@ -914,6 +951,8 @@ public static class ZbNet
     static void OnSocketClosed()
     {
         var m = mode;
+        if (CanResume()) { BeginReconnect(); return; }
+        RememberSession(0);
         ZbWs.Close();
         Network.peerType = NetworkPeerType.Disconnected;
         ResetSession();
@@ -1122,6 +1161,11 @@ public class NetRunner : MonoBehaviour
         if (minLife < float.MaxValue) sb.Append(",\"zlifeMin\":").Append(Mathf.Round(minLife)).Append(",\"zlifeMax\":").Append(Mathf.Round(maxLife));
         var md = FindFirstObjectByType<sc_matchdata>();
         sb.Append(",\"killed\":").Append(md != null ? md.zombieskilled : -1);
+        { // phase 4 tests: the money of the local player's match, and the saved (banked) money
+            var gc = FindFirstObjectByType<sc_gamecontrol>();
+            int mm = -1; foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) mm = sp.money; }
+            sb.Append(",\"money\":").Append(mm).Append(",\"bank\":").Append(gc != null ? gc.money : -1).Append(",\"lastacc\":").Append(gc != null ? gc.lastaccmoney : -1).Append(",\"gstate\":").Append(gc != null ? gc.gamestate : -1);
+        }
         foreach (var p in players) { var nv = p.GetComponent<NetworkView>(); var lf = p.GetComponent<sc_life>(); if (nv != null && nv.isMine && lf != null) sb.Append(",\"hp\":").Append(Mathf.Round(lf.quantia)); }
         sb.Append("}");
         Debug.Log("ZBDUMP " + sb);
@@ -1154,6 +1198,12 @@ public class NetRunner : MonoBehaviour
         foreach (var t in FindObjectsByType<Transform>(FindObjectsSortMode.None))
             if (t.name == "supplybaground(Clone)" && t.parent == null) { t.gameObject.NetView().RPC("openbag", RPCMode.All); Debug.Log("ZBBAG opened"); return; }
         Debug.Log("ZBBAG none");
+    }
+
+    // Test hook: DebugMoney("500") sets the local player's money of the running match (sc_spawner.money), what a player earns by killing zombies.
+    public void DebugMoney(string a)
+    {
+        foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) sp.money = int.Parse(a); }
     }
 
     // Test hook: top up the local player's life (idle test players get eaten by zombies).

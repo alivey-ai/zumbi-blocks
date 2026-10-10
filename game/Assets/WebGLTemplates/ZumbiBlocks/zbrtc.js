@@ -83,7 +83,19 @@
   };
 
   function onHello(m) {
-    Z.myId = m.id | 0; Z.isHost = !!m.host; Z.helloAt = now();
+    Z.myId = m.id | 0; Z.isHost = !!m.host;
+    if (m.resumed) {
+      // same session on a new WebSocket (phase 4 resume): a data channel does not depend on the socket and usually survived it, so keep it and
+      // tell the relay again that this client's lane is up (the relay's flag was per socket). Without a lane, start one as after a normal hello.
+      log('hello (resumed)', 'id=' + Z.myId);
+      if (!Z.isHost) {
+        var P0 = Z.peers[0];
+        if (P0 && !P0.torn) { if (P0.up) sendWs({ t: 'dc', up: true }); }
+        else { Z.helloAt = now(); Z.attempts = Math.min(Z.attempts, 1); startAttempt(); }
+      }
+      return;
+    }
+    Z.helloAt = now();
     log('hello', 'id=' + Z.myId, Z.isHost ? 'host' : 'client', 'mode=' + (MODE || 'auto'));
     if (!Z.isHost) startAttempt();
   }

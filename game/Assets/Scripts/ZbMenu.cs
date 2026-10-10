@@ -2,6 +2,7 @@
 // the original menu code (sc_gamecontrol.OnGUI) only gets a few one-line hooks into this file.
 //   state 30  nickname prompt (first multiplayer use)        state 31  Quick Play "finding a game"
 //   state 32  invite link (?room=CODE)                       state 33  all settings (FOV, quality, invert Y, sensitivity, volume)
+//   state 34  host left, the group continues in a new match (phase 4, level B)
 // Gameplay is not touched: Quick Play rooms may auto start (a countdown instead of ENTER), settings only change camera / quality / input sign.
 using System;
 using System.Collections;
@@ -72,7 +73,7 @@ public static class ZbSettings
 
 public static class ZbMenu
 {
-    public const int ST_NICK = 30, ST_QUICK = 31, ST_INVITE = 32, ST_SETTINGS = 33;
+    public const int ST_NICK = 30, ST_QUICK = 31, ST_INVITE = 32, ST_SETTINGS = 33, ST_HOSTLEFT = 34;
     const string QUICK_COMMENT = "Quick Play";
 
     // ---- small helpers -----------------------------------------------------------------------------------------
@@ -168,6 +169,7 @@ public static class ZbMenu
             case ST_QUICK: DrawQuick(g, cx); break;
             case ST_INVITE: DrawInvite(g, cx); break;
             case ST_SETTINGS: DrawSettings(g, cx); break;
+            case ST_HOSTLEFT: DrawHostLeft(g, cx); break;
         }
     }
 
@@ -217,7 +219,8 @@ public static class ZbMenu
 
     [Serializable] class QRoom { public string code, name, type; public int players, max; public bool pw; }
     [Serializable] class QList { public QRoom[] rooms; }
-    [Serializable] class RoomInfo { public bool exists, pw, started, ended, full; public string name, type; public int players, max, wave; }
+    [Serializable] class RestartInfo { public int successor; public bool claimOpen; }
+    [Serializable] class RoomInfo { public bool exists, pw, started, ended, full; public string name, type, hostState; public int players, max, wave, epoch; public RestartInfo restart; }
 
     static IEnumerator Get(string path, Action<long, string> done)
     {
@@ -255,12 +258,12 @@ public static class ZbMenu
         else { quickStatus = "No open game, creating one..."; CreateQuick(g); }
     }
 
-    static void JoinRoom(sc_gamecontrol g, string code, bool viaQuick)
+    static void JoinRoom(sc_gamecontrol g, string code, bool viaQuick, bool keepPassword = false)
     {
         g.ipstoconec = new[] { code }; g.trynow = 0; g.ipstotry = 1;
         if (g.porttoconec == 0) g.porttoconec = 25678;
         g.porttostring = "" + g.porttoconec;
-        g.the_password = "";
+        if (!keepPassword) g.the_password = "";
         g.iamserver = false; quickJoining = viaQuick; needClick = true;
         g.gamestate = 5;
         SceneManager.LoadScene(1);
@@ -281,6 +284,16 @@ public static class ZbMenu
     // OnFailedToConnect, first line: a Quick Play join that failed (the room filled up or closed in between) searches again, then creates.
     public static bool QuickFail(sc_gamecontrol g, NetworkConnectionError error)
     {
+        if (claiming && g.gamestate == 3)
+        {
+            // somebody else claimed the room first (or it closed): go back to the "host left" screen and join the new match instead
+            claiming = false; claimLost = true;
+            g.cam.parent = null; g.cam.localPosition = Vector3.zero; g.cam.localEulerAngles = Vector3.zero;
+            SceneManager.LoadScene(2);
+            g.gamestate = ST_HOSTLEFT; leftStatus = "Another player started the new match, joining...";
+            ZbNet.Run(RestartRoutine(g, ++restartToken));
+            return true;
+        }
         if (!quickJoining || g.gamestate != 5) return false;
         quickJoining = false;
         g.cam.parent = null; g.cam.localPosition = Vector3.zero; g.cam.localEulerAngles = Vector3.zero;
@@ -345,6 +358,96 @@ public static class ZbMenu
         Msg(g, cx, -150, inviteErr, Color.red);
         if (Btn(g, cx, -80, "Quick Play")) { ZbWs.ClearInviteParam(); StartQuick(g); }
         if (Btn(g, cx, -30, "Main menu")) { ZbWs.ClearInviteParam(); g.gamestate = 0; }
+    }
+
+    // ---- host left (phase 4) ------------------------------------------------------------------------------------
+    // Level A (approved): when the host leaves, the players keep the money of the match (banked like the ESC Disconnect does).
+    // Level B: the relay picks a remaining player as the new host ("claim restart"); everybody else polls /api/room/CODE and joins the new match
+    // of the same room code, without going through the menu. The old match is over for everybody (wave 1 again, avatars are new, money is kept).
+    static int restartToken; static bool claiming, claimLost, banked;
+    static string leftStatus = ""; static int leftMoney; static float leftAt;
+    static ZbNet.Lost leftSession;
+
+    public static void HostLeftBank(sc_gamecontrol g)
+    {
+        banked = false;
+        if (ZbNet.lastEndReason != 4 || g.gamestate != 6) return;
+        var sp = g.instedspawner != null ? g.instedspawner.GetComponent<sc_spawner>() : null;
+        int m = sp != null ? sp.money : 0;
+        g.lastaccmoney = m; g.money += m; g.save();
+        g.errormsg = "The host left the game. Your money was saved.";
+        banked = true; leftMoney = m;
+        Debug.Log("[zbmenu] host left: banked " + m + " (total " + g.money + ")");
+    }
+
+    public static void HostLeftScreen(sc_gamecontrol g)
+    {
+        if (!banked) return;
+        banked = false;
+        leftSession = ZbNet.lost;
+        if (!leftSession.restart || g.gamestate != 8) return; // nobody to continue with (relay closed the room): the plain error screen
+        g.gamestate = ST_HOSTLEFT; leftAt = Time.unscaledTime; claimLost = false; claiming = false;
+        leftStatus = "Looking for the new host...";
+        ZbNet.Run(RestartRoutine(g, ++restartToken));
+    }
+
+    static IEnumerator RestartRoutine(sc_gamecontrol g, int token)
+    {
+        var L = leftSession;
+        int gone = 0; float t0 = Time.unscaledTime;
+        while (token == restartToken && g.gamestate == ST_HOSTLEFT)
+        {
+            long code = 0; string body = "";
+            yield return Get("/api/room/" + Uri.EscapeDataString(L.code), (c, b) => { code = c; body = b; });
+            if (token != restartToken || g.gamestate != ST_HOSTLEFT) yield break;
+            var info = code == 200 ? JsonUtility.FromJson<RoomInfo>(body) : null;
+            if (code == 404 || (info != null && !info.exists)) { if (++gone >= 3) { leftStatus = "The room was closed."; yield break; } }
+            else if (info != null)
+            {
+                gone = 0;
+                if (info.hostState == "ok" && info.epoch != L.epoch)
+                {
+                    leftStatus = "Joining the new match..."; Debug.Log("[zbmenu] restart: joining the new match of " + L.code);
+                    JoinRoom(g, L.code, false, true);
+                    yield break;
+                }
+                if (info.hostState == "restarting" && !claimLost && info.restart != null)
+                {
+                    bool mine = info.restart.successor == L.id;
+                    if (mine || info.restart.claimOpen)
+                    {
+                        float wait = 3f - (Time.unscaledTime - leftAt); // a short, visible pause (and a chance to cancel)
+                        if (wait > 0f) leftStatus = "You are the new host. Starting a new match in " + Mathf.CeilToInt(wait) + "...";
+                        else { leftStatus = "Starting the new match..."; Debug.Log("[zbmenu] restart: claiming " + L.code + " as host"); Claim(g, L); yield break; }
+                    }
+                    else leftStatus = "Waiting for " + (info.restart.claimOpen ? "a" : "the") + " new host...";
+                }
+            }
+            if (Time.unscaledTime - t0 > 60f) { leftStatus = "Could not find the new match."; yield break; }
+            yield return new WaitForSecondsRealtime(0.5f);
+        }
+    }
+
+    static void Claim(sc_gamecontrol g, ZbNet.Lost L)
+    {
+        claiming = true; quickJoining = false; quickHosting = false; needClick = true; countdownEnd = -1f; hostCd = -1f; hostShrunk = false;
+        ZbNet.SetClaim(L.code, L.id, L.token);
+        g.iamserver = true;
+        Network.InitializeSecurity();
+        Network.incomingPassword = "";
+        Network.InitializeServer(16, g.porttoconec == 0 ? 25678 : g.porttoconec, false);
+        g.gamestate = 3;
+        SceneManager.LoadScene(1);
+    }
+
+    static void DrawHostLeft(sc_gamecontrol g, int cx)
+    {
+        Frame(g);
+        // the continue timer is polled by the routine; the screen only shows its latest status
+        Msg(g, cx, -190, "The host left the game.", Color.yellow);
+        Msg(g, cx, -150, "Your money from this match ($" + leftMoney + ") was saved.", Color.white);
+        Msg(g, cx, -90, leftStatus, Color.green);
+        if (Btn(g, cx, 0, "Main menu")) { restartToken++; g.gamestate = 0; }
     }
 
     // ---- settings ----------------------------------------------------------------------------------------------
@@ -480,6 +583,7 @@ public static class ZbMenu
             lastState = g.gamestate;
         }
         if (g.gamestate == 0) needClick = false;
+        if (claiming && ZbNet.Connected) claiming = false;
 
         HostTick(g);
     }
@@ -544,6 +648,16 @@ public static class ZbMenu
             big.normal.textColor = Color.white;
         }
         var shadow = new GUIStyle(big); shadow.normal.textColor = Color.black;
+        { // phase 4: connection lost / host lost / host tab hidden
+            Color sc; string st = ZbNet.StatusText(out sc);
+            if (st != null)
+            {
+                var small = new GUIStyle(big) { fontSize = 20 }; var sshadow = new GUIStyle(small); sshadow.normal.textColor = Color.black; small.normal.textColor = sc;
+                var rr = new Rect(0, 100, Screen.width, 40);
+                GUI.Label(new Rect(rr.x + 2, rr.y + 2, rr.width, rr.height), st, sshadow);
+                GUI.Label(rr, st, small);
+            }
+        }
         if (countdownEnd > 0f)
         {
             int s = Mathf.CeilToInt(countdownEnd - Time.unscaledTime);
@@ -593,6 +707,7 @@ public static class ZbMenu
                 + ",\"wave\":" + hl[i].wave + ",\"started\":" + (hl[i].started ? 1 : 0) + ",\"ping\":" + hl[i].ping + ",\"colo\":\"" + hl[i].colo + "\",\"country\":\"" + hl[i].country + "\"}";
         list += "]";
         return "{\"gamestate\":" + (g != null ? g.gamestate : -99) + ",\"countdown\":" + cd + ",\"quickHosting\":" + (quickHosting ? 1 : 0) + ",\"needClick\":" + (needClick ? 1 : 0) + ",\"overlay\":" + (overlay ? 1 : 0)
+            + ",\"net\":{\"reconnecting\":" + (ZbNet.reconnecting ? 1 : 0) + ",\"hostState\":" + ZbNet.hostState + ",\"seq\":" + ZbNet.LastSeq + ",\"sent\":" + ZbNet.SentBuffered + ",\"epoch\":" + ZbNet.Epoch + ",\"grace\":" + ZbNet.GraceSec + ",\"attempts\":" + ZbNet.Attempts + ",\"claiming\":" + (claiming ? 1 : 0) + ",\"leftStatus\":\"" + leftStatus.Replace("\"", "") + "\",\"leftMoney\":" + leftMoney + "}"
             + ",\"started\":" + (mc != null && mc.gamestarted ? 1 : 0) + ",\"deffov\":" + deffov + ",\"inviteErr\":\"" + inviteErr.Replace("\"", "") + "\",\"nick\":\"" + (g != null ? g.playernick : "") + "\",\"list\":" + list + "}";
     }
     // test hooks (NetRunner.Debug*)
