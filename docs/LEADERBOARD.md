@@ -12,6 +12,8 @@ Where to see them:
 * the web page: a Leaderboard panel under the game (also shown on phones, where the game itself is gated).
 * the end-of-match screen: "Leaderboard (solo|team, best wave): #N today, #M all time" for the run that just ended (rank of this run's wave among the best rows, counting your own earlier best too), plus a Leaderboard button.
 
+Profiles (docs/ACCOUNTS.md): a registered profile name can only be used by its owner (session checked by the server, solo and multiplayer); anybody else using it is recorded as "name (guest)". Host leaves and the match continues (B+): the first part is recorded for the old team when the host leaves, the continued match separately at its end (remaining players, timed from the original start, run id `r:CODE:start:epoch`).
+
 Nicknames: the game's own rule (2-10 letters / digits / space `_ - .`, not "player"). Single player now asks for the nickname before "Play alone" too (once per profile, like multiplayer), because it is shown publicly.
 
 ## How results are recorded

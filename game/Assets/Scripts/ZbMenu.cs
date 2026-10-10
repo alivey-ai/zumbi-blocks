@@ -351,10 +351,19 @@ public static class ZbMenu
     static IEnumerator InviteRoutine(sc_gamecontrol g)
     {
         long code = 0; string body = "";
-        yield return Get("/api/room/" + Uri.EscapeDataString(inviteCode), (c, b) => { code = c; body = b; });
-        if (g.gamestate != ST_INVITE) yield break;
+        RoomInfo info = null;
+        // the host just left and a remaining player is taking the room over (phase 4 claim restart, a few seconds): a join now would be refused
+        // ("host away") and land on the Direct IP screen, so wait for the new host first (up to 20 s)
+        for (int tries = 0; ; tries++)
+        {
+            yield return Get("/api/room/" + Uri.EscapeDataString(inviteCode), (c, b) => { code = c; body = b; });
+            if (g.gamestate != ST_INVITE) yield break;
+            info = code == 200 ? JsonUtility.FromJson<RoomInfo>(body) : null;
+            if (info == null || !info.exists || info.hostState == "ok" || info.hostState == "hidden" || tries >= 40) break;
+            yield return new WaitForSecondsRealtime(0.5f);
+            if (g.gamestate != ST_INVITE) yield break;
+        }
         if (code == 404) { Fail("Room " + inviteCode + " was not found or is closed."); yield break; }
-        var info = code == 200 ? JsonUtility.FromJson<RoomInfo>(body) : null;
         if (info == null || !info.exists) { Fail(code == 200 ? "Room " + inviteCode + " was not found or is closed." : "Could not reach the server, try again."); yield break; }
         if (info.type != Type(g)) { Fail("This room runs another version of the game."); yield break; }
         if (info.ended) { Fail("This match has already ended."); yield break; }

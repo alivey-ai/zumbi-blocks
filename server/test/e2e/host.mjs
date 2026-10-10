@@ -20,7 +20,7 @@ const stopAlive = () => { healers.splice(0).forEach(clearInterval); };
 async function room(name, n) {
   const pages = [];
   const A = await game(b, "A", BASE); pages.push(A);
-  const code = await createRoom(A, BASE, name);
+  const code = await createRoom(A, BASE, name, { listed: true }); // checks that name + listing survive the claim (a hidden test room)
   const clients = [];
   for (let i = 0; i < n; i++) { const C = await game(b, "C" + (i + 1), BASE); await joinByCode(C, code); clients.push(C); }
   await A.click_(640, 360); await A.keyboard.press("Enter");

@@ -1284,7 +1284,7 @@ public class NetRunner : MonoBehaviour
     }
 
     // Test hook (level B+): DebugGive("") puts the first gun (item type 0) the local player does not carry into a free slot, with a full magazine
-    // and 77 spare rounds (receiveitem, like a pickup); DebugGive("id,quant,ammo") gives that item. DebugKills("12") sets the local kills.
+    // and 77 spare rounds (receiveitem, like a pickup); DebugGive("id,quant,ammo") gives that item. DebugMyKills("12") sets the local kills.
     public void DebugGive(string a)
     {
         sc_player me = null;
@@ -1303,7 +1303,7 @@ public class NetRunner : MonoBehaviour
         me.receiveitem(id, q, am);
         Debug.Log("ZBGIVE " + id);
     }
-    public void DebugKills(string a) { foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) sp.kills = int.Parse(a); } }
+    public void DebugMyKills(string a) { foreach (var sp in FindObjectsByType<sc_spawner>(FindObjectsSortMode.None)) { var snv = sp.GetComponent<NetworkView>(); if (snv != null && snv.isMine) sp.kills = int.Parse(a); } }
 
     // Test hook: top up the local player's life (idle test players get eaten by zombies).
     public void DebugHeal(string unused)

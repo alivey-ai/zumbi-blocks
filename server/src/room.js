@@ -268,7 +268,8 @@ export class Room extends DurableObject {
     this.limbo.clear(); this.persistLimbo();
     this.pendingToHost = []; this.pendingBytes = 0; this.tomb = [];
     this.vis.clear(); this.bufOps.clear(); this.lastRtt.clear(); this.dcUp.clear();
-    Object.assign(m, { restart: null, nextId: 1, started: false, ended: false, wave: 0, alive: 0, bufGen: newToken().slice(0, 8), startedAt: 0, recorded: false, score: null });
+    Object.assign(m, { restart: null, nextId: 1, started: false, ended: false, wave: 0, alive: 0, bufGen: newToken().slice(0, 8), startedAt: 0, recorded: false, score: null,
+      carryStartedAt: r.wave > 1 ? r.startedAt || 0 : 0 });
     this.score = null;
     const ntok = newToken();
     server.serializeAttachment({ id: 0, host: true, ipid, rtc, v: 3, tok: ntok });
@@ -777,7 +778,8 @@ export class Room extends DurableObject {
     const m = this.meta;
     m.epoch = ((m.epoch || 0) + 1) & 255;
     // level B+: the wave the old match was on (from the host's C_META), a fallback for players that do not know it (the claimer continues there)
-    m.restart = { successor: cands[0][0], since: Date.now(), members, wave: m.started ? (m.wave || 0) : 0 };
+    m.restart = { successor: cands[0][0], since: Date.now(), members, wave: m.started ? (m.wave || 0) : 0,
+      startedAt: m.started ? (m.startedAt || 0) : 0 }; // leaderboard: the continued match (B+) is timed from the real start (plausibility checks)
     m.started = false; m.ended = false; m.wave = 0;
     // every player is told and disconnected: the old match is over for everybody. Players of protocol 3 find the new match by polling /api/room/CODE.
     const sockets = [...this.players.entries()].filter(([id]) => id !== 0);
@@ -854,7 +856,8 @@ export class Room extends DurableObject {
   }
   matchStarted() {
     const m = this.meta;
-    m.startedAt = Date.now(); m.recorded = false; m.score = null; this.score = null;
+    // a B+ continuation (claim restart at the old wave) keeps the old match's start time: "wave <= 1 + elapsed / 5 s" stays true
+    m.startedAt = m.carryStartedAt || Date.now(); m.carryStartedAt = 0; m.recorded = false; m.score = null; this.score = null;
     this.ctx.waitUntil?.(bumpStats(this.env, utcDay(m.startedAt), "online", 1, 0, 0).catch((e) => console.log("stats error", String(e))));
   }
 
@@ -869,7 +872,7 @@ export class Room extends DurableObject {
     // a team keeps its size (an invalid name shows as "anon"); a lone player needs a valid name. At least one valid name is required.
     const list = s && s.list.some(([n]) => cleanName(n)) ? s.list.map(([n, k]) => [cleanName(n) || (s.list.length >= 2 ? "anon" : null), k]).filter(([n]) => n) : [];
     const players = s ? Math.max(1, s.list.length) : Math.max(1, this.players.size);
-    const env = this.env, id = `r:${m.code}:${m.startedAt}`;
+    const env = this.env, id = `r:${m.code}:${m.startedAt}` + (m.epoch ? `:${m.epoch}` : ""); // + epoch: a B+ continuation keeps startedAt
     const plaus = list.length ? implausible({ wave, kills: list.reduce((a, p) => a + p[1], 0), elapsed, players }) : "names";
     const why = !s ? "no score" : (s.rules & 3) !== 3 ? "classic" : !list.length ? "names" : plaus;
     const work = (async () => {

@@ -170,6 +170,31 @@ await test("solo score rate limit (10 / min per IP)", async () => {
   assert.equal(last, 429);
 });
 
+await test("host leaves, match continues (B+): first part recorded for the old team, the continuation separately, timed from the original start", async () => {
+  const a = "zbt-" + rnd(), b = "zbt-" + rnd(), td = new TextDecoder();
+  const h = new Sock(`/ws/host?v=3&name=zbt+bplus&max=4&tclaim=500`); await h.opened;
+  const w = await h.take(0x81); const code = td.decode(w.subarray(8, 8 + w[7]));
+  const c = new Sock(`/ws/room/${code}?v=3`); await c.opened;
+  const cw = await c.take(0x81); const cid = new DataView(cw.buffer, cw.byteOffset).getInt32(1, true);
+  const o = 8 + cw[7], ctok = td.decode(cw.subarray(o + 1, o + 1 + cw[o]));
+  h.send(meta(1, true, false));
+  await sleep(11000); // wave 3 is plausible after 10 s
+  h.send(score(3, 3, [[a, 4], [b, 3]]), meta(3, true, false));
+  await sleep(300);
+  h.ws.close(1000); // host leaves for good -> part 1 recorded, claim restart
+  let row; for (let i = 0; i < 30 && !row; i++) { await sleep(200); row = (await board("team.all.wave")).find((r) => r.n === `${a}, ${b}`); }
+  assert.ok(row && row.w === 3 && row.k === 7, "part 1: " + JSON.stringify(row));
+  await sleep(300);
+  const nh = new Sock(`/ws/host?v=3&claim=${code}.${cid}.${ctok}`); await nh.opened; await nh.take(0x81);
+  nh.send(meta(2, false, false)); await sleep(200);
+  nh.send(meta(3, true, false)); await sleep(300); // the continuation starts at the old wave right away
+  nh.send(score(3, 3, [[b, 6]]), meta(3, true, true));
+  const r = result(await nh.take(0x96));
+  assert.equal(r.board, 0, "continuation is ranked (would be 'wave too fast' if timed from the claim)");
+  assert.ok((await board("solo.all.wave")).some((x) => x.n === b && x.w === 3 && x.k === 6));
+  nh.ws.close(); c.ws.close();
+});
+
 await test("/api/stats counts games per day", async () => {
   const j = await (await http("/api/stats")).json();
   const d = j.days[utcDay(Date.now())];

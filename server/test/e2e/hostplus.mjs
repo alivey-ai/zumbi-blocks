@@ -55,7 +55,7 @@ console.log("== 1. host leaves (Disconnect) at wave >= 3 with two clients: the n
   check("the match reached wave 3", W >= 3, J(W));
   await sleep(1500);
   await give(B); await give(B); await give(C);
-  await send(B, "DebugMoney", 400); await send(C, "DebugMoney", 150); await send(B, "DebugKills", 9);
+  await send(B, "DebugMoney", 400); await send(C, "DebugMoney", 150); await send(B, "DebugMyKills", 9);
   await sleep(800);
   const a0 = await A.dump();
   const b0 = await B.dump(), c0 = await C.dump();

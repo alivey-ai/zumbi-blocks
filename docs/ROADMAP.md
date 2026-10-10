@@ -54,7 +54,7 @@ Make online play feel smooth without changing the network architecture.
 - [x] **Game counts** per day in D1 (matches started / finished, player slots), unlisted `/api/stats`.
 - [x] **Visitor analytics**: Cloudflare Web Analytics (cookieless), privacy note on the page.
 - [x] Custom domain (zumbi-blocks-classic.vitosenic.com).
-- Personal stats saved per browser.
+- [x] **Player profiles** (docs/ACCOUNTS.md): profile name (= nickname, unique) + password, one-time recovery code instead of e-mail, cloud save in D1 (money, items, look, settings; debounced upload, revision check against stale tabs, sendBeacon on unload), guest save migrated on the first signup, stats (best wave, total kills, games played) on main menu > Profile, leaderboard names tied to the profile ("name (guest)" for anybody else), Delete profile. Guest play unchanged.
 - Discord server.
 - Gamepad support; maybe touch controls for tablets.
 
@@ -70,6 +70,5 @@ Make online play feel smooth without changing the network architecture.
 - ~~**Multiplayer airdrop bag on clients:** e2e saw 0 bags on the client side.~~ DONE: test artifact, clients do see (and can open) the bag. The test's bag counter went through `sc_matchcontroller`, which only the host has. Now counted by name; `supply.mjs` asserts the client sees exactly 1 bag and can open it (RECOVERY.md).
 - **Live e2e shooting checks** (2026-10-09, after the save/mannequin deploy): e2e.mjs against the live URL, 3 runs: 42/42, 41/42, 42/42. The one failure was "shooter sees own bullets immediately" (sample [0,186]: a point-in-time count of the shooter's bullets that read 0 once while 186 shots were counted overall). Local runs pass; B's received bullets passed in all 3 live runs. Judged a timing flake of the point sample (live RTT is higher, short bullet life), roughly 1 in 3 runs for that one check; no consistent live failure, nothing changed.
 - **Phase 2b:** client to host state over the data channel (the real Durable Object cost cut); check relay `p2p-stat` logs for the real-world direct-connect rate.
-- **Cloud "save code" (later, only if asked for):** short code like ZB-7K2M-Q9 to move a save between browsers, stored in D1, no accounts.
-- **Live e2e must not touch real players:** tests join via the server list and once clicked into a real room ("Prdo's game", 2026-10-10). Make live runs join only rooms they created (by code) and use an unlisted/test-tagged room.
+- ~~**Live e2e must not touch real players.**~~ DONE: every test page carries the cookie `zbtest=1`; rooms made by such a page are hidden test rooms (never in the server list or Quick Play of real players, and test pages only ever see test rooms). Test rooms are unlisted by default (`createRoom`), only the server list tests list them.
 - **Hidden host tab:** measure real behaviour once manually (Playwright cannot background a page).
