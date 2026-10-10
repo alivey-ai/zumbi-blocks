@@ -29,6 +29,10 @@
     #invite-copy { background: #222a22; color: #dfe8da; border: 1px solid #36423a; padding: 6px 14px; font: inherit; cursor: pointer; }
     #invite-copy:hover { background: #2c372c; }
     #invite-msg { color: #8fc760; min-width: 60px; }
+    #gate { display: none; width: 560px; max-width: 100%; margin-top: 8px; padding: 22px 22px 20px; background: #161a16; border: 1px solid #2a312a; text-align: center; }
+    #gate h2 { margin: 0 0 10px; font-size: 17px; letter-spacing: 0.06em; text-transform: uppercase; color: #e6ede1; font-weight: 600; }
+    #gate p { margin: 8px 0; }
+    #gate .room { margin-top: 14px; padding: 8px 10px; background: #0d0f0d; border: 1px solid #36423a; font-size: 13px; word-break: break-all; color: #dfe8da; }
     a { color: #8fc760; }
     a:hover { color: #b4e089; }
     .credit { margin-top: 18px; text-align: center; max-width: 760px; }
@@ -71,6 +75,12 @@
 </head>
 <body>
   <h1>Zumbi Blocks</h1>
+  <div id="gate" role="alert">
+    <h2>Desktop browser needed</h2>
+    <p>Zumbi Blocks is played with a keyboard and a mouse and downloads over 100 MB, so it does not run on phones and tablets yet.</p>
+    <p>Open this page on a computer (Chrome, Edge, Firefox or Safari) to play.</p>
+    <div class="room" id="gate-room" style="display:none"></div>
+  </div>
   <div id="stage">
     <canvas id="unity-canvas" width="1280" height="720" tabindex="-1"></canvas>
     <div id="loading"><div class="label">Loading</div><div id="bar"><div id="bar-full"></div></div></div>
@@ -133,6 +143,28 @@
       showBanner: showBanner,
       devicePixelRatio: 1 // perf: the original web player never rendered at retina scale
     };
+    // Desktop-only gate: phones and tablets get a message instead of a 100 MB download and a game that cannot be played
+    // (no keyboard, no pointer lock). Touch controls would lift it (roadmap phase 5). ?desktop=1 skips the check (testing, odd devices).
+    function isPhoneOrTablet() {
+      if (/[?&]desktop=1\b/.test(location.search)) return false;
+      var ua = navigator.userAgent || "";
+      if (/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle|BlackBerry|Opera Mini|IEMobile|webOS/i.test(ua)) return true;
+      if (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return true; // iPadOS pretends to be a Mac
+      if (navigator.userAgentData && navigator.userAgentData.mobile) return true;
+      var mm = window.matchMedia;
+      if (mm && mm("(pointer: coarse)").matches && !mm("(any-pointer: fine)").matches) return true;
+      return false;
+    }
+    if (isPhoneOrTablet()) {
+      window.zbGated = true;
+      document.querySelector("#gate").style.display = "block";
+      document.querySelector("#stage").style.display = "none";
+      document.querySelector("#bar-row").style.display = "none";
+      var m = /[?&]room=([A-Za-z0-9]{3,8})/.exec(location.search);
+      if (m) { var gr = document.querySelector("#gate-room"); gr.textContent = "Invite to room " + m[1].toUpperCase() + ": open " + location.origin + "/?room=" + m[1].toUpperCase() + " on a computer."; gr.style.display = "block"; }
+      document.title = "Zumbi Blocks (desktop browser needed)";
+    }
+    if (!window.zbGated) { // nothing below may start the download on a phone / tablet
     var script = document.createElement("script");
     script.src = buildUrl + "/{{{ LOADER_FILENAME }}}";
     script.onload = function () {
@@ -145,6 +177,7 @@
       }).catch(function (m) { showBanner(String(m), "error"); });
     };
     document.body.appendChild(script);
+    }
   </script>
 </body>
 </html>
