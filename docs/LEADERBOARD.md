@@ -46,4 +46,4 @@ Cloudflare Web Analytics, site `zumbi-blocks-classic.vitosenic.com` (site tag `c
 
 ## Tests
 * `server/test/scores.test.mjs`: unit (`--unit`: nickname rule, plausibility, token) and integration against a running Worker (team match recorded at the end with S_RESULT to both, host leaving mid-match, Classic and impossible wave unranked, best keeps the better run, solo token / score / reuse / checks, rate limit, stats, board shape and caching headers).
-* `server/test/e2e/leaderboard.mjs`: the real game: nickname prompt before Play alone, a solo run with rank on the end screen and the row on the solo board, the Leaderboard screen from the main menu, the web panel, a host + client match (joined by code) recorded by the relay with the host's per-player kills and the rank on both screens.
+* `server/test/e2e/leaderboard.mjs`: the real game: nickname prompt before Play alone, a solo run with rank on the end screen and the row on the solo board, the Leaderboard screen from the main menu, the web panel, a host + client match in an unlisted room (joined by code) recorded by the relay with the host's per-player kills and the rank on both screens.

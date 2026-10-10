@@ -1,12 +1,12 @@
 // Phase 5 leaderboard, end to end in the real game (docs/LEADERBOARD.md):
 //   * a fresh profile is asked for a nickname before Play alone
 //   * single player: /api/run token at the start, /api/score at the end, rank shown on the end-of-match screen, row on the (hidden) solo board
-//   * multiplayer: host + client (joined BY CODE, never from the list), the relay records the match when everybody is dead, both see the rank,
+//   * multiplayer: host + client in an UNLISTED room (joined by code, so no real player can wander in), the relay records the match when everybody is dead, both see the rank,
 //     row on the (hidden) team board with the host's per-player kills
 //   * the Leaderboard screen opens from the main menu and loads the boards; the web page panel renders
 // Test nicknames start with "zbt-": stored hidden, never on the public boards (read back with ?hidden=1). Safe against the live site.
 //   BASE=http://localhost:8799/ CH=chrome node leaderboard.mjs
-import { launch, game, createRoom, joinByCode, until, sleep } from "./lib.mjs";
+import { launch, game, joinByCode, until } from "./lib.mjs";
 const BASE = process.env.BASE || "http://localhost:8787/";
 const b = await launch();
 let pass = 0, fail = 0;
@@ -66,7 +66,14 @@ console.log("== multiplayer (host + client by code)");
   const na = "zbt-" + rnd(), nb = "zbt-" + rnd();
   const A = await game(b, "A", BASE);
   await send(A, "DebugNick", na);
-  const code = await createRoom(A, BASE, "zbt " + rnd().slice(0, 5));
+  // unlisted room (the original default; createRoom() switches "Show in server list" on): nobody else can find it, B joins by code
+  await A.click_(750, 281); await A.click_(750, 331);
+  await A.click_(850, 185); await A.keyboard.type("zbt " + rnd().slice(0, 5), { delay: 30 });
+  await A.click_(750, 481); await A.waitForTimeout(5000);
+  const code = (await A.dump()).code;
+  const listed = (await (await fetch(new URL("/api/rooms", BASE))).json()).some((r) => r.code === code);
+  check("test room is not in the public server list", !listed);
+  if (listed) { console.log("room is listed: stopping before anybody can join it"); await A.context().close(); await b.close(); process.exit(1); }
   check("host created a room", !!code, code);
   const B = await game(b, "B", BASE);
   await send(B, "DebugNick", nb);
