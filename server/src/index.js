@@ -2,6 +2,7 @@
 export { Room } from "./room.js";
 export { Lobby } from "./lobby.js";
 import { bumpStats, checkToken, cleanName, implausible, leaderboardResponse, makeToken, recordRun, statsResponse, utcDay } from "./scores.js";
+import { creditStats, handleAccount, isTestRequest, protectNames, sessionAccount } from "./accounts.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I, O, 0, 1
 const CODE_RE = /^[A-Z0-9]{3,8}$/;
@@ -74,7 +75,9 @@ async function soloScore(request, env) {
   const elapsed = (now - tok.ms) / 1000;
   const day = utcDay(now);
   if (b.rules !== "std") {
-    // Classic rules (or an unknown value) never go on the boards; the game still counts
+    // Classic rules (or an unknown value) never go on the boards; the game still counts (and so does the profile's stats when logged in)
+    const s = await sessionAccount(env, request, now);
+    if (s && !implausible({ wave, kills, secs, elapsed, players: 1 })) await creditStats(env, [[s.aid, kills]], wave);
     await bumpStats(env, day, "single", 0, 1, 1);
     return Response.json({ ok: true, board: false, reason: "classic" }, noStore);
   }
@@ -82,10 +85,14 @@ async function soloScore(request, env) {
   if (!nick) return Response.json({ ok: false, error: "nickname" }, { status: 400, ...noStore });
   const why = implausible({ wave, kills, secs, elapsed, players: 1 });
   if (why) { console.log("score-rejected", JSON.stringify({ why, wave, kills, secs, elapsed: Math.round(elapsed) })); return Response.json({ ok: false, error: "implausible" }, { status: 422, ...noStore }); }
-  const res = await recordRun(env, { id: "s:" + tok.nonce, players: [[nick, kills]], wave, secs, source: "client", now });
+  // a registered profile name counts only for its owner (session cookie); anybody else is recorded as "name (guest)" (docs/ACCOUNTS.md)
+  const s = await sessionAccount(env, request, now);
+  const prot = await protectNames(env, [[nick, kills]], s ? { [s.nkey]: s.aid } : {});
+  const res = await recordRun(env, { id: "s:" + tok.nonce, players: prot.list, wave, secs, source: "client", now });
   if (!res.ok) return Response.json({ ok: false, error: "already recorded" }, { status: 409, ...noStore });
+  await creditStats(env, prot.credit, wave);
   await bumpStats(env, day, "single", 0, 1, 1);
-  return Response.json({ ok: true, board: true, mode: res.mode, today: res.today, all: res.all }, noStore);
+  return Response.json({ ok: true, board: true, mode: res.mode, today: res.today, all: res.all, name: prot.list[0][0] }, noStore);
 }
 
 export default {
@@ -97,6 +104,13 @@ export default {
       const ip = clientIp(request, env);
       const [lim, win] = path.startsWith("/api/ping/") ? LIMITS.ping : LIMITS.api;
       if (!localHit((path.startsWith("/api/ping/") ? "p:" : "a:") + ip, lim, win)) return tooMany(win);
+    }
+
+    // ---- player profiles + cloud save (docs/ACCOUNTS.md) ----
+    if (path.startsWith("/api/account/")) {
+      const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
+      const allow = async (key, [lim, win]) => { try { return await lobby.hit(key, lim, win); } catch { return true; } };
+      return handleAccount(request, env, ctx, { ip: clientIp(request, env), allow });
     }
 
     // ---- phase 5: leaderboards, solo results, game counts (docs/LEADERBOARD.md) ----
@@ -116,7 +130,7 @@ export default {
 
     if (path === "/api/rooms") {
       const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
-      const rooms = await lobby.list();
+      const rooms = await lobby.list(isTestRequest(request)); // automated tests (cookie zbtest=1) only ever see their own rooms, everybody else never sees them
       return Response.json(rooms, { headers: { "cache-control": "no-store" } });
     }
 
@@ -132,7 +146,7 @@ export default {
     if (path === "/api/quickplay") {
       const cf = request.cf || {};
       const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
-      const rooms = await lobby.quickplay(url.searchParams.get("type") || "", Number(cf.latitude) || 0, Number(cf.longitude) || 0);
+      const rooms = await lobby.quickplay(url.searchParams.get("type") || "", Number(cf.latitude) || 0, Number(cf.longitude) || 0, isTestRequest(request));
       return Response.json(rooms, { headers: { "cache-control": "no-store" } });
     }
 
@@ -145,12 +159,19 @@ export default {
       if (path === "/ws/host") {
         if (!(await allow("c:" + ip, LIMITS.create)) || !(await allow("ch:" + ip, LIMITS.createHour))) return rejectSocket(6);
       } else if (!(await allow((rejoin ? "r:" : "j:") + ip, rejoin ? LIMITS.rejoin : LIMITS.join))) return rejectSocket(6);
+      // profiles: a socket that joins with a session cookie carries its account (checked here, never taken from the client) so the relay
+      // can tie leaderboard names to accounts; resumes and claims are members already. Test pages (cookie zbtest=1) make hidden test rooms.
+      const acct = url.searchParams.has("rejoin") || url.searchParams.has("claim") ? null : await sessionAccount(env, request).catch(() => null);
+      const test = isTestRequest(request);
       const fwd = (code, host) => {
         const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
         const u = new URL(request.url);
         u.searchParams.set("code", code);
         u.searchParams.set("host", host ? "1" : "0");
         u.searchParams.set("ipid", ip);
+        u.searchParams.delete("acct"); u.searchParams.delete("test");
+        if (acct) u.searchParams.set("acct", acct.aid + ":" + acct.nkey);
+        if (test) u.searchParams.set("test", "1");
         // where the host is (server side only: the room list publishes colo + country, never lat/lon)
         const cf = request.cf || {};
         for (const [k, v] of [["colo", cf.colo], ["country", cf.country], ["lat", cf.latitude], ["lon", cf.longitude]]) { u.searchParams.delete(k); if (host && v != null) u.searchParams.set(k, String(v)); }

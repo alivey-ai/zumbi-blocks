@@ -1,14 +1,14 @@
 // Phase 3 (getting into a game): nickname prompt, Quick Play (creates / joins), auto start countdown, invite links, server list fields,
 // settings persistence. Headless Chrome pages against a running server.
 //   CH=chrome BASE=http://localhost:8787/ node phase3.mjs
-import { launch, game } from "./lib.mjs";
+import { launch, game, TEST_FETCH } from "./lib.mjs";
 import WebSocket from "ws";
 const BASE = process.env.BASE || "http://localhost:8787/";
 const J = (x) => JSON.stringify(x);
 const b = await launch();
 let pass = 0, fail = 0;
 const check = (name, cond, extra = "") => { if (cond) { pass++; console.log("ok   " + name); } else { fail++; console.log("FAIL " + name + " " + extra); } };
-const rooms = async () => (await fetch(new URL("/api/rooms", BASE))).json();
+const rooms = async () => (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json(); // hidden test rooms only (lib.mjs TEST_COOKIE)
 const info = async (code) => { const r = await fetch(new URL("/api/room/" + code, BASE)); return { status: r.status, body: await r.json() }; };
 const until = async (fn, ms = 20000, step = 400) => { const t0 = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t0 > ms) return v; await new Promise((r) => setTimeout(r, step)); } };
 const nickIfAsked = async (P, name = "Guest") => { const x = await P.menu(); if (x && x.gamestate === 30) { await P.click_(750, 281); await P.keyboard.type(name, { delay: 30 }); await P.click_(750, 381); await P.waitForTimeout(500); } };

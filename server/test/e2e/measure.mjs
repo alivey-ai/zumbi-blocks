@@ -2,7 +2,7 @@
 // (bytes/s, frames/s, messages/s, messages per frame, per-RPC breakdown, state update arrival intervals).
 // Works against old and new builds (decodes both RPC and compact state messages).
 //   BASE=http://localhost:8787/?netsim=120,30 CH=chrome node measure.mjs
-import { launch, game } from "./lib.mjs";
+import { launch, game, TEST_FETCH } from "./lib.mjs";
 const BASE = process.env.BASE || "http://localhost:8787/";
 const WINDOW = Number(process.env.WINDOW || 25000);
 const b = await launch();
@@ -43,7 +43,7 @@ const A = await mk("A");
 await A.click_(750, 281); await A.click_(750, 331);
 await A.click_(850, 185); await A.keyboard.type("Measure", { delay: 30 });
 await A.click_(750, 331); await A.click_(750, 481); await A.waitForTimeout(5000);
-const rooms = await (await fetch(new URL("/api/rooms", BASE))).json();
+const rooms = await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json();
 const B = await mk("B");
 await B.click_(750, 281); await B.click_(750, 381); await B.waitForTimeout(1500);
 await B.click_(400, 45); await B.click_(750, 561); await B.waitForTimeout(5000);

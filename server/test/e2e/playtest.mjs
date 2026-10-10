@@ -1,5 +1,5 @@
 // Playtest features: timed waves (default) vs Classic, wave number + timer on the HUD, teammates' health.
-import { launch, game, createRoom, joinFromList, until, sleep, heal } from "./lib.mjs";
+import { launch, game, createRoom, joinByCode, until, sleep, heal } from "./lib.mjs";
 const BASE = process.env.BASE || "http://localhost:8787/";
 const b = await launch();
 let pass = 0, fail = 0;
@@ -13,7 +13,7 @@ async function match(name, mode, loot, solo) {
   if (loot) await send(A, "DebugLoot", loot);
   const code = await createRoom(A, BASE, name);
   let B = null;
-  if (!solo) { B = await game(b, "B", BASE); await joinFromList(B); }
+  if (!solo) { B = await game(b, "B", BASE); await joinByCode(B, code); }
   await A.click_(640, 360); await A.keyboard.press("Enter"); if (B) await B.click_(640, 360); await A.waitForTimeout(7000);
   return { A, B, code };
 }

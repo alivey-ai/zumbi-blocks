@@ -2,8 +2,15 @@ import { chromium } from "playwright-core";
 export async function launch() {
   return chromium.launch({ headless: true, channel: process.env.CH || undefined, args: process.env.CH ? ["--use-angle=metal", "--ignore-gpu-blocklist", "--enable-gpu-rasterization", "--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--enable-webgl", "--autoplay-policy=no-user-gesture-required", "--disable-features=WebRtcHideLocalIpsWithMdns"] });
 }
+// Every test page carries the cookie zbtest=1: rooms it creates are hidden test rooms (never in the server list / Quick Play of real players,
+// and test pages only ever see test rooms), so a live run can neither be joined by a real player nor wander into a real room.
+// Node side requests to /api/rooms must send it too (TEST_FETCH) to see the test rooms.
+export const TEST_COOKIE = "zbtest=1";
+export const TEST_FETCH = { headers: { cookie: TEST_COOKIE } };
+export const apiRooms = async (base) => (await fetch(new URL("/api/rooms", base), TEST_FETCH)).json();
 export async function game(b, name, base = "http://localhost:8787/", opts = {}) {
   const ctx = await b.newContext({ viewport: { width: 1400, height: 900 } });
+  await ctx.addCookies([{ name: "zbtest", value: "1", url: new URL(base).origin }]);
   const p = await ctx.newPage();
   p.name = name; p.logs = [];
   p.on("console", (m) => { const t = m.text(); p.logs.push(t); if (/zbnet|shim|Exception|Error|error/i.test(t) && !/GL Driver|ReadPixels/.test(t)) console.log(`[${name}]`, t.slice(0, 400)); });
@@ -45,16 +52,20 @@ export async function game(b, name, base = "http://localhost:8787/", opts = {}) 
 }
 
 // ---- phase 4 helpers (same click paths as e2e.mjs) -------------------------------------------------------------------------------
-// A creates a listed room (the original menu: Play > Create server > name > Start); resolves with the room code from /api/rooms.
-export async function createRoom(A, base, name = "P4 Room") {
+// A creates a room (the original menu: Play > Create server > name > Start) and resolves with its code. Unlisted unless { listed: true }
+// (only tests about the server list need that; even then it is a hidden test room, see TEST_COOKIE).
+export async function createRoom(A, base, name = "P4 Room", { listed = false } = {}) {
   await A.click_(750, 281); await A.click_(750, 331);
   await A.click_(850, 185); await A.keyboard.type(name, { delay: 30 });
-  await A.click_(750, 331); await A.click_(750, 481);
+  if (listed) await A.click_(750, 331); // "Show in server list" (off by default)
+  await A.click_(750, 481);
   await A.waitForTimeout(5000);
-  const rooms = await (await fetch(new URL("/api/rooms", base))).json();
-  if (!rooms.some((x) => x.name === name)) console.log("createRoom: rooms are", JSON.stringify(rooms.map((x) => [x.code, x.name, x.age])));
-  const r = rooms.filter((x) => x.name === name).sort((a, b) => a.age - b.age)[0]; // newest (older runs may linger for a while)
-  return r ? r.code : null;
+  const d = await A.dump();
+  if (listed) {
+    const rooms = await apiRooms(base);
+    if (!rooms.some((x) => x.code === d.code)) console.log("createRoom: not listed; rooms are", JSON.stringify(rooms.map((x) => [x.code, x.name, x.age])));
+  }
+  return d && d.code ? d.code : null;
 }
 // B joins the first room of the server list.
 export async function joinFromList(B) {

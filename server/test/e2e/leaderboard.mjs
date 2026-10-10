@@ -6,7 +6,7 @@
 //   * the Leaderboard screen opens from the main menu and loads the boards; the web page panel renders
 // Test nicknames start with "zbt-": stored hidden, never on the public boards (read back with ?hidden=1). Safe against the live site.
 //   BASE=http://localhost:8799/ CH=chrome node leaderboard.mjs
-import { launch, game, joinByCode, until } from "./lib.mjs";
+import { launch, game, joinByCode, until, TEST_FETCH } from "./lib.mjs";
 const BASE = process.env.BASE || "http://localhost:8787/";
 const b = await launch();
 let pass = 0, fail = 0;
@@ -71,7 +71,7 @@ console.log("== multiplayer (host + client by code)");
   await A.click_(850, 185); await A.keyboard.type("zbt " + rnd().slice(0, 5), { delay: 30 });
   await A.click_(750, 481); await A.waitForTimeout(5000);
   const code = (await A.dump()).code;
-  const listed = (await (await fetch(new URL("/api/rooms", BASE))).json()).some((r) => r.code === code);
+  const listed = (await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json()).some((r) => r.code === code);
   check("test room is not in the public server list", !listed);
   if (listed) { console.log("room is listed: stopping before anybody can join it"); await A.context().close(); await b.close(); process.exit(1); }
   check("host created a room", !!code, code);

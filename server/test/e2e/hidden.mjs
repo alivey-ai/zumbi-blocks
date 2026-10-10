@@ -1,7 +1,7 @@
 // Phase 4 step 5: a hidden host tab. Playwright keeps every page "visible" (a page cannot be backgrounded in automation), so the page's visibility is
 // simulated (visibilityState + visibilitychange event, exactly what the browser fires). Covers: C_VIS from the page, the relay's host state, the
 // clients' "host paused" state, the host's tab-title warning and the banner on return.
-import { launch, game, createRoom, joinFromList, until, sleep, heal } from "./lib.mjs";
+import { launch, game, createRoom, joinByCode, until, sleep, heal } from "./lib.mjs";
 const BASE = process.env.BASE || "http://localhost:8787/";
 const b = await launch();
 let pass = 0, fail = 0;
@@ -12,7 +12,7 @@ const net = async (p) => (await p.menu()).net;
 
 const A = await game(b, "A", BASE);
 const code = await createRoom(A, BASE, "Hidden1");
-const B = await game(b, "B", BASE); await joinFromList(B);
+const B = await game(b, "B", BASE); await joinByCode(B, code);
 await A.click_(640, 360); await A.keyboard.press("Enter"); await B.click_(640, 360); await A.waitForTimeout(4000);
 const hb = setInterval(() => { heal(A).catch(() => {}); heal(B).catch(() => {}); }, 700);
 const title0 = await A.title();

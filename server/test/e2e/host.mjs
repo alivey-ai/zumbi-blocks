@@ -3,7 +3,7 @@
 //   Level B: a remaining player becomes the new host of the SAME room code ("claim restart") and the group continues in a new match without
 //   going through the menu. Covers: clean leave via Disconnect, tab closed, host connection dead for longer than the grace period, the chosen
 //   successor opting out, the last player left, and an old host that comes back.
-import { launch, game, createRoom, joinFromList, joinByCode, until, sleep, heal } from "./lib.mjs";
+import { launch, game, createRoom, joinByCode, until, sleep, heal, TEST_FETCH } from "./lib.mjs";
 const BASE = process.env.BASE || "http://localhost:8787/";
 const b = await launch();
 let pass = 0, fail = 0;
@@ -139,7 +139,7 @@ console.log("== 5. nobody left to take over: the room closes");
   const { A, code } = await room("HostLeft5", 0);
   await leaveViaMenu(A); await sleep(2500);
   const i = await api(code);
-  check("room is gone and no longer listed", !i.exists && !(await (await fetch(new URL("/api/rooms", BASE))).json()).some((r) => r.code === code), J(i));
+  check("room is gone and no longer listed", !i.exists && !(await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json()).some((r) => r.code === code), J(i));
   stopAlive();
   await A.context().close();
 }

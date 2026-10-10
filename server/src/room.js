@@ -8,6 +8,7 @@
 //   * "claim restart" (Level B): when the host is gone for good a remaining player claims the room code and the group continues in a new match
 import { DurableObject } from "cloudflare:workers";
 import { bumpStats, cleanName, implausible, recordRun, utcDay } from "./scores.js";
+import { creditStats, protectNames } from "./accounts.js";
 
 // client -> relay
 const C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11,
@@ -168,7 +169,10 @@ export class Room extends DurableObject {
         lat: Number(q.get("lat")) || 0, lon: Number(q.get("lon")) || 0,
         wave: 0, started: false, ended: false, alive: 0, quick: false,
         epoch: 0, bufGen: newToken().slice(0, 8), restart: null,
+        test: q.get("test") === "1", // created by an automated test (never listed for real players, docs/ACCOUNTS.md)
+        accts: {},                   // profiles: name key -> account id of every socket that joined with a session (set by the Worker)
       };
+      this.noteAcct(q);
       // local tests only (wrangler dev --var ZB_TEST:1): short grace / silence times
       if (this.env.ZB_TEST) { const g = Number(q.get("grace")), st = Number(q.get("tstale")); if (g > 0) this.meta.grace = g; if (st > 0) this.meta.staleMs = st; const cl = Number(q.get("tclaim")); if (cl > 0) this.meta.claimMs = cl; }
       this.resetBuffer();
@@ -196,6 +200,7 @@ export class Room extends DurableObject {
     if (this.players.size + this.limbo.size >= this.meta.max || this.meta.nextId > MAX_PLAYER_ID) return reject(R_FULL);
 
     const id = this.meta.nextId++;
+    this.noteAcct(q);
     await this.ctx.storage.put("meta", this.meta);
     const tok = v3 ? newToken() : "";
     server.serializeAttachment({ id, host: false, ipid, rtc, v: v3 ? 3 : 2, tok });
@@ -840,6 +845,12 @@ export class Room extends DurableObject {
   }
 
   // ---- phase 5: leaderboard + game counts (docs/LEADERBOARD.md) ------------------------------------------------------------------------
+  // profiles (docs/ACCOUNTS.md): "acct" = "id:namekey", added by the Worker after checking the session cookie (never from the client)
+  noteAcct(q) {
+    const a = q.get("acct"), i = a ? a.indexOf(":") : -1;
+    if (i <= 0 || !this.meta) return;
+    (this.meta.accts ||= {})[a.slice(i + 1)] = Number(a.slice(0, i));
+  }
   matchStarted() {
     const m = this.meta;
     m.startedAt = Date.now(); m.recorded = false; m.score = null; this.score = null;
@@ -858,11 +869,16 @@ export class Room extends DurableObject {
     const list = s && s.list.some(([n]) => cleanName(n)) ? s.list.map(([n, k]) => [cleanName(n) || (s.list.length >= 2 ? "anon" : null), k]).filter(([n]) => n) : [];
     const players = s ? Math.max(1, s.list.length) : Math.max(1, this.players.size);
     const env = this.env, id = `r:${m.code}:${m.startedAt}`;
-    const why = !s ? "no score" : (s.rules & 3) !== 3 ? "classic" : !list.length ? "names" : implausible({ wave, kills: list.reduce((a, p) => a + p[1], 0), elapsed, players });
+    const plaus = list.length ? implausible({ wave, kills: list.reduce((a, p) => a + p[1], 0), elapsed, players }) : "names";
+    const why = !s ? "no score" : (s.rules & 3) !== 3 ? "classic" : !list.length ? "names" : plaus;
     const work = (async () => {
       await bumpStats(env, utcDay(now), "online", 0, 1, players);
+      // profiles: a registered name counts only for the account that joined with it, anybody else shows as "name (guest)"; the verified
+      // profiles get the match in their stats (any rules, if plausible)
+      const prot = s && list.length ? await protectNames(env, list, m.accts || {}) : { list, credit: [] };
+      if (!plaus) await creditStats(env, prot.credit, wave);
       if (why) { console.log("match-not-ranked", JSON.stringify({ code: m.code, reason, why, wave, players, elapsed: Math.round(elapsed) })); this.sendResult(255, 0, 0); return; }
-      const res = await recordRun(env, { id, players: list, wave, secs: elapsed, source: "relay", now });
+      const res = await recordRun(env, { id, players: prot.list, wave, secs: elapsed, source: "relay", now });
       console.log("match-recorded", JSON.stringify({ code: m.code, reason, wave, players: list.length, ok: res.ok, today: res.today, all: res.all }));
       if (res.ok) this.sendResult(res.mode === "team" ? 1 : 0, res.today, res.all);
     })().catch((e) => console.log("record error", String(e)));
@@ -884,7 +900,7 @@ export class Room extends DurableObject {
     this.lobby().upsert({
       code: m.code, name: m.name, players: m.restart ? 0 : this.players.size + this.limbo.size, max: m.max, type: m.type, pw: !!m.pw, comment: m.comment,
       wave: m.wave || 0, started: !!m.started, ended: !!m.ended, created: m.created, colo: m.colo || "", country: m.country || "",
-      lat: m.lat || 0, lon: m.lon || 0, quick: !!m.quick,
+      lat: m.lat || 0, lon: m.lon || 0, quick: !!m.quick, test: !!m.test,
     }).catch(() => {});
   }
 

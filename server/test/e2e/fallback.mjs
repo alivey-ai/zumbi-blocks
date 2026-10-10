@@ -15,8 +15,8 @@ const J = (x) => JSON.stringify(x);
 const A = await game(b, "A", BASE);
 await A.click_(750, 281); await A.click_(750, 331);
 await A.click_(850, 185); await A.keyboard.type("Fallback", { delay: 30 });
-await A.click_(750, 331); await A.click_(750, 481); await A.waitForTimeout(4000);
-const code = (await (await fetch(new URL("/api/rooms", BASE))).json())[0].code;
+await A.click_(750, 481); await A.waitForTimeout(4000); // unlisted: the others join by code
+const code = (await A.dump()).code;
 const joinCode = async (name, q) => {
   const P = await game(b, name, q ? withQ(BASE, q) : BASE);
   await P.click_(750, 281); await P.click_(750, 431); await P.waitForTimeout(800);

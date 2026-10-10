@@ -1,4 +1,4 @@
-import { launch, game } from "./lib.mjs";
+import { launch, game, TEST_FETCH } from "./lib.mjs";
 import assert from "node:assert/strict";
 const BASE0 = process.env.BASE || "http://localhost:8787/";
 // NETSIM="60,20": every page adds 60 ms round trip +-20 ms jitter to its own socket (client <-> host path is crossed twice: ~2x).
@@ -21,7 +21,7 @@ await A.click_(750, 281); await A.click_(750, 331);
 await A.click_(850, 185); await A.keyboard.type("E2E Room", { delay: 30 });
 await A.click_(750, 331); await A.click_(750, 481);
 await A.waitForTimeout(5000);
-const rooms = await (await fetch(new URL("/api/rooms", BASE))).json();
+const rooms = await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json();
 check("room appears in /api/rooms", rooms.length === 1 && rooms[0].name === "E2E Room", J(rooms));
 const code = rooms[0].code;
 
@@ -43,7 +43,7 @@ await C.click_(750, 431); await C.waitForTimeout(5000);
 let dc = await C.dump(); da = await A.dump(); db = await B.dump();
 check("C joined by code (client, id 2)", dc && dc.mode === "client" && dc.id === 2, J(dc));
 check("everyone sees 3 players", da.players.length === 3 && db.players.length === 3 && dc.players.length === 3, J([da.players.length, db.players.length, dc.players.length]));
-check("room list shows 3/16", (await (await fetch(new URL("/api/rooms", BASE))).json())[0].players === 3);
+check("room list shows 3/16", (await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json())[0].players === 3);
 
 // --- start the match ---
 await A.click_(640, 360); await A.keyboard.press("Enter"); await A.waitForTimeout(12000);
@@ -164,7 +164,7 @@ dd = await D.dump(); da = await A.dump();
 check("host is offline after Disconnect", da.mode === "offline", J(da));
 check("remaining client takes over: host of the same room code, in a fresh match (claim restart; see host.mjs for the full flow)", dd.mode === "host" && dd.code === code, J(dd));
 await D.shot("d_after_host_left.png");
-const after = await (await fetch(new URL("/api/rooms", BASE))).json();
+const after = await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json();
 check("room stays in the list under the same code, hosted by D", after.length === 1 && after[0].code === code && after[0].players === 1, J(after));
 
 console.log(`${pass} passed, ${fail} failed`);

@@ -125,6 +125,7 @@
   <p class="small">Unofficial web revival of the original 2013 game, hosted with the author's permission.</p>
   <p class="small">Privacy: online play uses a direct browser-to-browser connection (WebRTC) between you and the host when it can, so the host's browser can see your IP address and you can see theirs. Add <code>?p2p=0</code> to the address to turn it off (everything then goes through the relay server).
     Your nickname, wave and kills are shown publicly on the leaderboard when you finish a match with the default rules. Visits are counted with Cloudflare Web Analytics (cookieless, no personal data, no tracking across sites).</p>
+  <p class="small">Profiles (optional, main menu &gt; Profile): a profile stores its name (your nickname), a salted hash of the password (never the password itself) and your game save (money, items, look, settings) plus best wave, total kills and games played, so you can log in on any browser and get your progress back. Logging in sets one cookie that only keeps you logged in (90 days, removed when you log out). No e-mail is collected: a forgotten password is reset with the recovery code shown when the profile is created. Delete a profile any time in the game: main menu &gt; Profile &gt; Delete profile (needs the password); this removes the profile, its save and its stats.</p>
 
   <script>
     // Leaderboard panel (phase 5, docs/LEADERBOARD.md): GET /api/leaderboard (cached for about a minute), refreshed every 60 s while the page is visible.

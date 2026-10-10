@@ -379,6 +379,7 @@ public class sc_gamecontrol : MonoBehaviour
 			PlayerPrefs.SetInt("ZB_" + saveversion + "_invent" + i, invent[i]);
 		}
 		PlayerPrefs.Save(); // WebGL port: flush to IndexedDB now, otherwise the data is lost when the tab is closed
+		ZbProfile.OnSave(this); // profiles: upload to the cloud save when logged in (docs/ACCOUNTS.md)
 	}
 
 	public void load()
@@ -2705,8 +2706,10 @@ public class sc_gamecontrol : MonoBehaviour
 				Application.ExternalEval("window.close()");
 			}
 			ZbBoard.MainMenuButton(this, num7); // phase 5: Leaderboard in place of the original's unused grey "Credits" row (credits are on the web page)
+			ZbProfile.MainMenuButton(this, num7); // profiles: "Profile" row below Quit (docs/ACCOUNTS.md)
 		}
 		ZbMenu.Draw(this, num7); // phase 3: states 30 nickname, 31 Quick Play, 32 invite, 33 settings
+		ZbProfile.Draw(this, num7); // profiles: states 50-56 (docs/ACCOUNTS.md)
 		if (gamestate == 13)
 		{
 			if (GUI.Button(new Rect((float)(Screen.width / 2 - 200), (float)(Screen.height / 2 - 35), 400f, 32f), language[languageset].frase[49]))

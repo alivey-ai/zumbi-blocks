@@ -1,6 +1,6 @@
 // Phase 4 step 3: a client (and the host) survive a dropped WebSocket: same player, same money, no OnPlayerDisconnected on the host,
 // the WebRTC lane comes back; after the grace period the old behaviour (back to the menu) applies.
-import { launch, game, createRoom, joinFromList, until, sleep, dropSocket, heal } from "./lib.mjs";
+import { launch, game, createRoom, joinFromList, until, sleep, dropSocket, heal, TEST_FETCH } from "./lib.mjs";
 const BASE = process.env.BASE || "http://localhost:8787/";
 const b = await launch();
 let pass = 0, fail = 0;
@@ -10,7 +10,7 @@ const GRACE = Number(process.env.GRACE || 20);
 const net = async (p) => { const m = await p.menu(); return m && m.net; };
 
 const A = await game(b, "A", BASE);
-const code = await createRoom(A, BASE, "Resume");
+const code = await createRoom(A, BASE, "Resume", { listed: true }); // checks the list row below (a hidden test room)
 check("host created a room", !!code, code);
 const B = await game(b, "B", BASE);
 await joinFromList(B);
@@ -79,7 +79,7 @@ const hh0 = hostAvatar(await B.dump());
 await A.keyboard.down("s"); await A.waitForTimeout(2000); await A.keyboard.up("s"); await A.waitForTimeout(1500);
 const hhA = hostAvatar(await A.dump()), hhB = hostAvatar(await B.dump());
 check("match goes on after the host drop: B sees the host's avatar move again, zombies still counted", Math.hypot(hhB.x - hh0.x, hhB.z - hh0.z) > 1 && Math.hypot(hhA.x - hhB.x, hhA.z - hhB.z) < 2 && (await B.dump()).zombies > 0, J([hh0, hhA, hhB]));
-check("room still listed with its player", (await (await fetch(new URL("/api/rooms", BASE))).json()).some((r) => r.code === code && r.players === 2));
+check("room still listed with its player", (await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json()).some((r) => r.code === code && r.players === 2));
 
 // ---- an outage longer than the grace period: v0.7 behaviour (lost connection, back in the menu) ----------------------------------
 console.log(`going offline for ${GRACE + 6} s ...`);
@@ -95,7 +95,7 @@ await B.context().setOffline(false);
 await sleep(1500);
 da = await A.dump();
 check("the host dropped the missing player after the grace period (remote 0, avatar gone)", da.remote === 0 && da.players.every((p) => p.owner !== 1), J([da.remote, da.players.map((p) => p.owner)]));
-const rooms = await (await fetch(new URL("/api/rooms", BASE))).json();
+const rooms = await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json();
 check("room list count follows (1 player)", rooms.some((r) => r.code === code && r.players === 1), J(rooms.map((r) => [r.code, r.players])));
 
 clearInterval(healer);

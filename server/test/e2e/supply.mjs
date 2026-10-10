@@ -50,9 +50,9 @@ async function drop(P, label) {
   const A = await game(b, "A", BASE);
   await A.click_(750, 281); await A.click_(750, 331);
   await A.click_(850, 185); await A.keyboard.type("Supply Room", { delay: 30 });
-  await A.click_(750, 331); await A.click_(750, 481);
+  await A.click_(750, 481); // unlisted (B joins by code)
   await A.waitForTimeout(5000);
-  const rooms = await (await fetch(new URL("/api/rooms", BASE))).json();
+  const rooms = [{ code: (await dumpOf(A)).code }];
   const B = await game(b, "B", BASE);
   await B.click_(750, 281); await B.click_(750, 431); await B.waitForTimeout(800);
   await B.click_(850, 265); await B.keyboard.press("Control+a"); await B.keyboard.type(rooms[rooms.length - 1].code, { delay: 30 });
