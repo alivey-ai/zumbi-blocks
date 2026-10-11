@@ -27,7 +27,13 @@ mergeInto(LibraryManager.library, {
       }
       return true;
     };
-    s.queue = []; s.state = 1; s.err = 0; s.lastArrival = 0; s.pendingOut = 0; s.closed = false;
+    s.queue = []; s.state = 1; s.err = 0; s.lastArrival = 0; s.pendingOut = 0; s.closed = false; s.lastTx = performance.now();
+    // Keepalive (free plan budget, docs/MULTIPLAYER.md): when this page has sent nothing for 4.5 s it sends the text "zbka"; the Durable Object
+    // runtime answers it by itself (setWebSocketAutoResponse) without waking the object, and the relay's silence check reads that timestamp.
+    if (!s.kaTimer) s.kaTimer = setInterval(function () {
+      var w = s.ws; if (!w || w.readyState !== 1 || s.state !== 2) return;
+      if (performance.now() - (s.lastTx || 0) > 4500) { try { w.send('zbka'); s.lastTx = performance.now(); } catch (e) {} }
+    }, 1000);
     s.lastSendAt = 0; s.lastRecvAt = 0;
     var ns = (/[?&]netsim=([0-9.]+)(?:,([0-9.]+))?/.exec(location.search) || []);
     s.simD = (parseFloat(ns[1]) || 0) / 2; s.simJ = (parseFloat(ns[2]) || 0) / 2;
@@ -68,6 +74,7 @@ mergeInto(LibraryManager.library, {
     var s = window.__zbws;
     if (!s || !s.ws || s.state !== 2 || s.closed) return 0;
     var data = HEAPU8.slice(ptr, ptr + len);
+    s.lastTx = performance.now();
     if (!s.sim) { s.ws.send(data); return 1; }
     var now = performance.now();
     var at = Math.max(s.lastSendAt, now + Math.max(0, s.simD + (Math.random() * 2 - 1) * s.simJ));
@@ -95,6 +102,12 @@ mergeInto(LibraryManager.library, {
   ZbWsLastArrival: function () {
     var s = window.__zbws;
     return s ? s.lastArrival : 0;
+  },
+  // Local wall clock time ("HH:MM", the browser's time zone) of the next 00:00 UTC: when the free plan's daily Durable Object quota resets.
+  ZbQuotaResetLocal: function () {
+    var t = '';
+    try { var n = new Date(); var r = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1)); t = r.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch (e) { t = '00:00 UTC'; }
+    var n2 = lengthBytesUTF8(t) + 1; var p = _malloc(n2); stringToUTF8(t, p, n2); return p;
   },
   // performance.now() in ms: the common clock for send stamps and arrival times.
   ZbNow: function () { return performance.now(); },

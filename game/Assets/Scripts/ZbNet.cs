@@ -26,6 +26,8 @@ static class ZbWs
     [DllImport("__Internal")] static extern void ZbWsClose();
     [DllImport("__Internal")] static extern IntPtr ZbOrigin();
     [DllImport("__Internal")] static extern IntPtr ZbQuery();
+    [DllImport("__Internal")] static extern IntPtr ZbQuotaResetLocal();
+    public static string QuotaResetLocal() { return Marshal.PtrToStringUTF8(ZbQuotaResetLocal()); }
     [DllImport("__Internal")] static extern double ZbNow();
     [DllImport("__Internal")] static extern double ZbWsLastArrival();
     [DllImport("__Internal")] static extern double ZbNetsimMs();
@@ -59,6 +61,7 @@ static class ZbWs
     public static void Close() { }
     public static string Origin() { return "http://localhost:8787"; }
     public static string Query() { return ""; }
+    public static string QuotaResetLocal() { return DateTime.UtcNow.Date.AddDays(1).ToLocalTime().ToString("HH:mm"); }
     public static double Now() { return UnityEngine.Time.realtimeSinceStartupAsDouble * 1000.0; }
     public static double LastArrival() { return Now(); }
     public static double NetsimMs() { return 0; }
@@ -529,7 +532,7 @@ public static partial class ZbNet
         }
         int need = 2 + w.n;
         if (outLen + need > OUT_SOFT && ZbWs.State() == 2) FlushOut();
-        if (outLen == 0) StampFrame(); // every frame starts with this peer's clock reading
+        if (outLen == 0 || stampFrame != Time.frameCount) StampFrame(); // every game frame's messages start with this peer's clock reading (a batch can hold several)
         if (outLen + need > OUT_CAP) { Debug.LogWarning("[zbnet] out queue full, dropping"); return; }
         if (outLen + need > outBuf.Length) Array.Resize(ref outBuf, Math.Max(outBuf.Length * 2, outLen + need));
         outBuf[outLen++] = (byte)w.n; outBuf[outLen++] = (byte)(w.n >> 8);
@@ -623,8 +626,10 @@ public static partial class ZbNet
 
     // C_TIME: u32 sender clock (ms, performance.now) of the moment this frame was started. The relay passes it on to the
     // recipients (S_TIME) so they can interpolate on the sender's timeline instead of on jittery arrival times.
+    static int stampFrame = -1;
     static void StampFrame()
     {
+        stampFrame = Time.frameCount;
         outBuf[outLen++] = 5; outBuf[outLen++] = 0; outBuf[outLen++] = C_TIME;
         uint ms = (uint)(long)ZbWs.Now();
         outBuf[outLen++] = (byte)ms; outBuf[outLen++] = (byte)(ms >> 8); outBuf[outLen++] = (byte)(ms >> 16); outBuf[outLen++] = (byte)(ms >> 24);
@@ -642,7 +647,7 @@ public static partial class ZbNet
             while (o + 2 <= outLen)
             {
                 int len = outBuf[o] | (outBuf[o + 1] << 8);
-                if ((o - start + 2 + len > 60000 || n >= 400) && o > start) break;
+                if ((o - start + 2 + len > 60000 || n >= 1500) && o > start) break; // relay: 64 KB / 2048 messages per frame
                 o += 2 + len; n++;
             }
             var chunk = new byte[o - start];
@@ -655,6 +660,7 @@ public static partial class ZbNet
     // ---- per frame ---------------------------------------------------------------------------
     static readonly byte[] rx = new byte[1 << 19];
     static float nextPing, nextEcho;
+    const float PING_EVERY = 10f;
     struct PendingRpc { public float t; public int sender; public long view; public string name; public object[] args; }
     static readonly List<PendingRpc> pendingRpcs = new List<PendingRpc>();
     static readonly Queue<Action> deferred = new Queue<Action>();
@@ -676,7 +682,7 @@ public static partial class ZbNet
             if (ZbCfg.p2p) DrainDc();
             if (Connected && Time.unscaledTime >= nextPing)
             {
-                nextPing = Time.unscaledTime + 2f;
+                nextPing = Time.unscaledTime + PING_EVERY; // relay rtt (successor choice, GetAveragePing); rides along in a batch
                 w.Begin(C_PING).I32((int)(Time.realtimeSinceStartup * 1000f)).U16(Mathf.Clamp(myPing, 0, 65535));
                 Queue();
             }
@@ -724,9 +730,21 @@ public static partial class ZbNet
         }
     }
 
+    // Fixed-rate flush (free plan budget): the data channel lane still goes out every frame (it is not billed), the WebSocket only every
+    // 1/15 s (host) or 1/10 s (clients). Interpolation renders ~100 ms behind and works on the per game frame clock readings, so the
+    // coalescing only adds that much latency to what travels over the relay.
+    static float nextFlush;
     public static void LateTick()
     {
-        if (mode != Mode.Offline) FlushOut();
+        if (mode == Mode.Offline) return;
+        float hz = mode == Mode.Host || mode == Mode.HostConnecting ? ZbCfg.flushHost : ZbCfg.flushClient;
+        float now = Time.unscaledTime;
+        if (hz <= 0f || now >= nextFlush || outLen > OUT_SOFT)
+        {
+            FlushOut();
+            if (hz > 0f) nextFlush = Mathf.Max(nextFlush + 1f / hz, now - 0.5f / hz); // steady cadence, no catch-up burst after a stall
+        }
+        else FlushFast();
     }
 
     static readonly byte[] echoOut = new byte[12];
@@ -1028,6 +1046,7 @@ public static partial class ZbNet
     [Serializable] class RoomRec { public string code, name, type, comment, colo, country; public int players, max, wave, age; public bool pw, started, ended; }
     [Serializable] class RoomList { public RoomRec[] rooms; }
     public static HostData[] hostList = new HostData[0];
+    public static bool quotaHit;                          // the relay said the free plan's daily Durable Object quota is used up (503 "quota")
     public static int hostListStamp;                      // changes whenever hostList was replaced
     static int listRequest;
     static readonly Dictionary<string, int> pingCache = new Dictionary<string, int>();
@@ -1044,7 +1063,8 @@ public static partial class ZbNet
         {
             yield return wr.SendWebRequest();
             if (req != listRequest) yield break; // a newer request (or ClearHostList) superseded this one
-            if (wr.result != UnityWebRequest.Result.Success) { Debug.LogWarning("[zbnet] room list failed: " + wr.error); yield break; }
+            if (wr.result != UnityWebRequest.Result.Success) { quotaHit = wr.responseCode == 503 && (wr.downloadHandler.text ?? "").Contains("quota"); Debug.LogWarning("[zbnet] room list failed: " + wr.error); yield break; }
+            quotaHit = false;
             var list = JsonUtility.FromJson<RoomList>("{\"rooms\":" + wr.downloadHandler.text + "}");
             var res = new List<HostData>();
             if (list != null && list.rooms != null)
@@ -1073,17 +1093,17 @@ public static partial class ZbNet
         }
     }
 
-    // Ping estimate: round trip of GET /api/ping/CODE (browser -> edge -> the room's Durable Object -> back), min of 2, for the first 8 rows,
-    // at most once per 10 s per room. This is the path a player's game traffic takes through the relay.
+    // Ping estimate: round trip of GET /api/ping/CODE (browser -> edge -> the room's Durable Object -> back), one probe for the first 6 rows,
+    // at most once per 30 s per room (each probe is a billed Durable Object request). This is the path a player's game traffic takes through the relay.
     static IEnumerator ProbePings(HostData[] rows, int req)
     {
-        for (int i = 0; i < rows.Length && i < 8; i++)
+        for (int i = 0; i < rows.Length && i < 6; i++)
         {
             var h = rows[i]; string code = h.guid;
-            float last; if (pingAt.TryGetValue(code, out last) && Time.unscaledTime - last < 10f) continue;
+            float last; if (pingAt.TryGetValue(code, out last) && Time.unscaledTime - last < 30f) continue;
             pingAt[code] = Time.unscaledTime;
             int best = int.MaxValue;
-            for (int k = 0; k < 2; k++)
+            for (int k = 0; k < 1; k++)
             {
                 using (var wr = UnityWebRequest.Get(ZbWs.Origin() + "/api/ping/" + Uri.EscapeDataString(code)))
                 {

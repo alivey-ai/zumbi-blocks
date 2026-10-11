@@ -26,7 +26,7 @@ class Client {
     this.ws = new WebSocket(`ws://${BASE}${path}`, { headers: { "X-Zb-Test-Ip": `10.${(Math.random() * 250) | 0}.${(Math.random() * 250) | 0}.${(Math.random() * 250) | 0}`, ...(headers || {}) } });
     this.ws.binaryType = "arraybuffer";
     this.ws.on("message", (d, isBinary) => {
-      if (isBinary === false) { try { this.texts.push(JSON.parse(Buffer.from(d).toString())); } catch { this.texts.push({ bad: true }); } this.pump(); return; }
+      if (isBinary === false) { const raw = Buffer.from(d).toString(); (this.raw ||= []).push(raw); try { this.texts.push(JSON.parse(raw)); } catch { this.texts.push({ bad: true }); } this.pump(); return; }
       const f = new Uint8Array(d);
       let o = 0; const fr = [];
       while (o + 2 <= f.length) { const len = f[o] | (f[o + 1] << 8); o += 2; const m = f.slice(o, o + len); this.msgs.push(m); fr.push(m); o += len; }
@@ -62,6 +62,7 @@ class Client {
   close() { this.ws.close(); }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(fn, ms = 3000) { const t0 = Date.now(); for (;;) { const v = await fn(); if (v || Date.now() - t0 > ms) return v; await sleep(50); } }
 const dv = (m) => new DataView(m.buffer, m.byteOffset, m.byteLength);
 
 async function host(extra = "") {
@@ -645,6 +646,74 @@ await test("p4: a reloaded tab frees its old limbo slot with stale=ID.TOKEN", as
   const blocked = new Client(`/ws/room/${code}?v=3`); await blocked.opened; assert.equal((await blocked.take(0x87))[1], 3);
   const n = await join3(code, `&stale=1.${a.tok}`); assert.ok(n.w.id > 1);
   [h, n.c].forEach((x) => x.close());
+});
+
+// ---- free plan budget (docs/MULTIPLAYER.md "Free plan budget") ----------------------------------------------------------------------
+await test("budget: a batch with several game frames: each recipient gets the clock reading in front of the messages that followed it", async () => {
+  const { h, code } = await host();
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code); await b.take(0x8a); await h.take(0x85);
+  a.frames.length = 0; b.frames.length = 0; h.frames.length = 0;
+  const V = SCENE(21);
+  h.send(stamp(1000), state(1, V, 14), rpc(1, V, "f1"), stamp(1066), state(1, V, 14), stamp(1133), rpc(1, V, "f3"));
+  await a.take(0x82); await sleep(200);
+  for (const c of [a, b]) {
+    assert.equal(c.frames.length, 1, "still one WebSocket frame per recipient");
+    const f = c.frames[0];
+    assert.deepEqual(f.map((m) => m[0]), [0x8b, 0x8d, 0x82, 0x8b, 0x8d, 0x8b, 0x82]);
+    assert.deepEqual(f.filter((m) => m[0] === 0x8b).map((m) => dv(m).getUint32(5, true)), [1000, 1066, 1133]);
+  }
+  // a client batch whose first game frame only had a request for the host: the other client gets only the clock reading that applies to it
+  h.frames.length = 0; b.frames.length = 0;
+  a.send(stamp(50), rpc(0, V, "toHost"), stamp(116), rpc(1, V, "toAll"));
+  await b.take(0x82); await sleep(200);
+  assert.deepEqual(h.frames[0].map((m) => m[0]), [0x8b, 0x82, 0x8b, 0x82]);
+  assert.deepEqual(b.frames[0].map((m) => m[0]), [0x8b, 0x82]); assert.equal(dv(b.frames[0][0]).getUint32(5, true), 116); assert.equal(dv(b.frames[0][0]).getInt32(1, true), 1);
+  [h, a, b].forEach((x) => x.close());
+});
+
+await test("budget: a frame with 1500 messages (300 zombies at 20 Hz flushed at 4 Hz) is routed completely", async () => {
+  const { h, code } = await host();
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  a.frames.length = 0; a.msgs.length = 0;
+  const bodies = [stamp(1)]; for (let i = 0; i < 1500; i++) bodies.push(state(1, SCENE(1000 + i), 14));
+  h.send(...bodies);
+  await sleep(700);
+  assert.equal(a.count(0x8d), 1500);
+  [h, a].forEach((x) => x.close());
+});
+
+await test("budget: keepalive 'zbka' is answered by the runtime and keeps a visible but otherwise silent socket out of limbo", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85); await a.c.take(0x8a);
+  a.c.ws.send("zbka");
+  await until(() => (a.c.raw || []).includes("zbka"), 2000);
+  assert.ok((a.c.raw || []).includes("zbka"), "auto response");
+  // tstale is 2.5 s: a sends only keepalives for 5 s while the host keeps the relay busy (so it sweeps)
+  for (let i = 0; i < 20; i++) { a.c.ws.send("zbka"); h.send(new Uint8Array([7, 0, 0, 0, 0, 0, 0])); await sleep(250); }
+  await h.none(0x86, 100);
+  assert.ok(!a.c.closed, "a kept its socket");
+  [h, a.c].forEach((x) => x.close());
+});
+
+await test("budget: when the Durable Object quota is used up the Worker answers JSON 503 'quota' and sockets get REJECT 11", async () => {
+  const qh = { headers: { cookie: "zbquota=1" } };
+  for (const p of ["/api/rooms", "/api/quickplay?type=x", "/api/room/ABCDE", "/api/ping/ABCDE"]) {
+    const r = await fetch(`http://${BASE}${p}`, qh); assert.equal(r.status, 503, p);
+    const j = await r.json(); assert.equal(j.error, "quota"); assert.ok(j.resetAt > Date.now() && j.resetAt % 86400000 === 0, "next 00:00 UTC");
+  }
+  const s1 = new Client(`/ws/host?v=3&name=Q`, { cookie: "zbquota=1" }); await s1.opened; assert.equal((await s1.take(0x87))[1], 11);
+  const s2 = new Client(`/ws/room/ABCDE?v=3`, { cookie: "zbquota=1" }); await s2.opened; assert.equal((await s2.take(0x87))[1], 11);
+  assert.equal((await fetch(`http://${BASE}/api/leaderboard`, qh)).status, 200, "the leaderboard (D1) does not need a Durable Object");
+});
+
+await test("budget: the room list is cached at the edge for a few seconds (x-zb-cache: 1 turns the cache on in local tests)", async () => {
+  const h1 = { headers: { "x-zb-cache": "1" } };
+  await sleep(5200);
+  const r1 = await fetch(`http://${BASE}/api/rooms`, h1); await r1.json();
+  const r2 = await fetch(`http://${BASE}/api/rooms`, h1); await r2.json();
+  const r3 = await fetch(`http://${BASE}/api/quickplay?type=x`, h1); await r3.json();
+  assert.equal(r1.headers.get("x-zb-cached"), "0"); assert.equal(r2.headers.get("x-zb-cached"), "1"); assert.equal(r3.headers.get("x-zb-cached"), "1", "Quick Play reads the same cached rows");
 });
 
 console.log(`${ok} tests passed`);

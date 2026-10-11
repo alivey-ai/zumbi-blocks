@@ -74,7 +74,7 @@ public static class ZbSettings
 
 public static class ZbMenu
 {
-    public const int ST_NICK = 30, ST_QUICK = 31, ST_INVITE = 32, ST_SETTINGS = 33, ST_HOSTLEFT = 34, ST_SOLO = 36;
+    public const int ST_NICK = 30, ST_QUICK = 31, ST_INVITE = 32, ST_SETTINGS = 33, ST_HOSTLEFT = 34, ST_SOLO = 36, ST_QUOTA = 37;
     const string QUICK_COMMENT = "Quick Play";
 
     // ---- small helpers -----------------------------------------------------------------------------------------
@@ -173,6 +173,7 @@ public static class ZbMenu
             case ST_HOSTLEFT: DrawHostLeft(g, cx); break;
             case ZbBoard.ST_BOARD: ZbBoard.Draw(g, cx); break;
             case ST_SOLO: StartSolo(g); break;
+            case ST_QUOTA: DrawQuota(g, cx); break;
         }
     }
 
@@ -249,7 +250,7 @@ public static class ZbMenu
         {
             wr.timeout = 8;
             yield return wr.SendWebRequest();
-            done(wr.result == UnityWebRequest.Result.Success || wr.responseCode == 404 ? wr.responseCode : -1, wr.downloadHandler != null ? wr.downloadHandler.text : "");
+            done(wr.result == UnityWebRequest.Result.Success || wr.responseCode == 404 || wr.responseCode == 503 ? wr.responseCode : -1, wr.downloadHandler != null ? wr.downloadHandler.text : "");
         }
     }
 
@@ -261,6 +262,7 @@ public static class ZbMenu
         yield return Get("/api/quickplay?type=" + Uri.EscapeDataString(type), (c, b) => { code = c; body = b; });
         Debug.Log("[zbmenu] quickplay answer " + code + " token " + token + "/" + quickToken + " state " + g.gamestate);
         if (token != quickToken || g.gamestate != ST_QUICK) yield break;
+        if (IsQuota(code, body)) { ShowQuota(g); yield break; }
         var cands = new List<QRoom>();
         if (code == 200) { var l = JsonUtility.FromJson<QList>("{\"rooms\":" + body + "}"); if (l != null && l.rooms != null) cands.AddRange(l.rooms); }
         foreach (var cand in cands)
@@ -269,6 +271,7 @@ public static class ZbMenu
             long ic = 0; string ib = "";
             yield return Get("/api/room/" + Uri.EscapeDataString(cand.code), (cc, b) => { ic = cc; ib = b; });
             if (token != quickToken || g.gamestate != ST_QUICK) yield break;
+            if (IsQuota(ic, ib)) { ShowQuota(g); yield break; }
             if (ic != 200) continue;
             var info = JsonUtility.FromJson<RoomInfo>(ib);
             if (info == null || !info.exists || info.full || info.pw || info.ended || info.type != type) continue;
@@ -305,6 +308,15 @@ public static class ZbMenu
     // OnFailedToConnect, first line: a Quick Play join that failed (the room filled up or closed in between) searches again, then creates.
     public static bool QuickFail(sc_gamecontrol g, NetworkConnectionError error)
     {
+        if (ZbNet.lastEndReason == ZbNet.R_QUOTA)
+        {
+            // hosting or joining was refused because the free plan's daily quota is used up: explain it instead of "connection failed"
+            claiming = false; quickJoining = false; quickHosting = false;
+            g.cam.parent = null; g.cam.localPosition = Vector3.zero; g.cam.localEulerAngles = Vector3.zero;
+            SceneManager.LoadScene(2);
+            ShowQuota(g);
+            return true;
+        }
         if (claiming && g.gamestate == 3)
         {
             // somebody else claimed the room first (or it closed): go back to the "host left" screen and join the new match instead
@@ -358,9 +370,10 @@ public static class ZbMenu
         {
             yield return Get("/api/room/" + Uri.EscapeDataString(inviteCode), (c, b) => { code = c; body = b; });
             if (g.gamestate != ST_INVITE) yield break;
+            if (IsQuota(code, body)) { ZbWs.ClearInviteParam(); ShowQuota(g); yield break; }
             info = code == 200 ? JsonUtility.FromJson<RoomInfo>(body) : null;
-            if (info == null || !info.exists || info.hostState == "ok" || info.hostState == "hidden" || tries >= 40) break;
-            yield return new WaitForSecondsRealtime(0.5f);
+            if (info == null || !info.exists || info.hostState == "ok" || info.hostState == "hidden" || tries >= 14) break;
+            yield return new WaitForSecondsRealtime(1.5f); // every poll is a billed Durable Object request
             if (g.gamestate != ST_INVITE) yield break;
         }
         if (code == 404) { Fail("Room " + inviteCode + " was not found or is closed."); yield break; }
@@ -505,7 +518,16 @@ public static class ZbMenu
 
     public static void HostLeftBank(sc_gamecontrol g)
     {
-        banked = false;
+        banked = false; quotaBanked = -1;
+        if (ZbNet.lastEndReason == ZbNet.R_QUOTA && g.gamestate == 6)
+        {
+            // the match was cut off by the free plan quota: keep the money, like the ESC Disconnect / host left
+            var qs = g.instedspawner != null ? g.instedspawner.GetComponent<sc_spawner>() : null;
+            int qm = qs != null ? qs.money : 0;
+            g.lastaccmoney = qm; g.money += qm; g.save(); quotaBanked = qm;
+            Debug.Log("[zbmenu] quota: banked " + qm);
+            return;
+        }
         if (ZbNet.lastEndReason != 4 || g.gamestate != 6) return;
         var sp = g.instedspawner != null ? g.instedspawner.GetComponent<sc_spawner>() : null;
         int m = sp != null ? sp.money : 0;
@@ -539,6 +561,7 @@ public static class ZbMenu
             long code = 0; string body = "";
             yield return Get("/api/room/" + Uri.EscapeDataString(L.code), (c, b) => { code = c; body = b; });
             if (token != restartToken || g.gamestate != ST_HOSTLEFT) yield break;
+            if (IsQuota(code, body)) { ShowQuota(g); yield break; }
             var info = code == 200 ? JsonUtility.FromJson<RoomInfo>(body) : null;
             if (info != null && info.restart != null) ZbCarry.RelayInfo(info.restart.wave, info.restart.wave > 0);
             if (code == 404 || (info != null && !info.exists)) { if (++gone >= 3) { leftStatus = "The room was closed."; yield break; } }
@@ -565,7 +588,7 @@ public static class ZbMenu
                 }
             }
             if (Time.unscaledTime - t0 > 60f) { leftStatus = "Could not find the new match."; yield break; }
-            yield return new WaitForSecondsRealtime(0.5f);
+            yield return new WaitForSecondsRealtime(1f); // every poll is a billed Durable Object request
         }
     }
 
@@ -592,6 +615,38 @@ public static class ZbMenu
         Msg(g, cx, -90, leftStatus, Color.green);
         Cursor.lockState = CursorLockMode.None; Cursor.visible = true; // the match left the pointer locked (a script of the old scene re-locks it after the disconnect)
         if (Btn(g, cx, 0, "Main menu")) { restartToken++; g.gamestate = 0; }
+    }
+
+    // ---- free plan quota (docs/MULTIPLAYER.md "Free plan budget") ---------------------------------------------------------------------------
+    // The relay runs on Cloudflare's free plan: 100,000 Durable Object requests a day, reset at 00:00 UTC. When they are used up, online play
+    // stops until then (the Worker answers 503 {"error":"quota"} / REJECT 11); single player needs no server and keeps working.
+    static int quotaBanked = -1; static string quotaReset = "";
+    static bool IsQuota(long code, string body) { return code == 503 && body != null && body.Contains("quota"); }
+    public static void ShowQuota(sc_gamecontrol g)
+    {
+        quotaReset = ZbWs.QuotaResetLocal();
+        quickToken++; restartToken++;
+        Cursor.lockState = CursorLockMode.None; Cursor.visible = true;
+        g.gamestate = ST_QUOTA;
+        Debug.Log("[zbmenu] QUOTA screen, back at " + quotaReset);
+    }
+    // OnDisconnectedFromServer, after the host-left hooks: a session cut off by the quota shows the explanation instead of "You left the game"
+    public static void QuotaScreen(sc_gamecontrol g)
+    {
+        if (ZbNet.lastEndReason != ZbNet.R_QUOTA) return;
+        if (g.cam != null) UnityEngine.Object.DontDestroyOnLoad(g.cam.gameObject);
+        ShowQuota(g);
+    }
+    public static string QuotaLine() { return "Online servers are full for today (free limit). Single player works; online is back at " + (quotaReset.Length > 0 ? quotaReset : ZbWs.QuotaResetLocal()) + " (your local time)."; }
+    static void DrawQuota(sc_gamecontrol g, int cx)
+    {
+        Frame(g);
+        Msg(g, cx, -190, "Online servers are full for today (free limit).", Color.yellow);
+        Msg(g, cx, -150, "Single player works; online is back at " + quotaReset + " (your local time).", Color.white);
+        Cursor.lockState = CursorLockMode.None; Cursor.visible = true; // a script of the match scene may re-lock the pointer after the disconnect
+        if (quotaBanked >= 0) Msg(g, cx, -110, "Your money from this match ($" + quotaBanked + ") was saved.", Color.white);
+        if (Btn(g, cx, -50, "Play alone")) { quotaBanked = -1; if (!SoloNick(g)) StartSolo(g); }
+        if (Btn(g, cx, 0, "Main menu")) { quotaBanked = -1; g.gamestate = 0; }
     }
 
     // ---- settings ----------------------------------------------------------------------------------------------
@@ -670,6 +725,7 @@ public static class ZbMenu
 
     public static void ListHeader(sc_gamecontrol g)
     {
+        if (ZbNet.quotaHit) { var o = GUI.color; GUI.color = Color.yellow; GUI.Label(new Rect(20f, Screen.height - 60f, Screen.width - 40f, 20f), QuotaLine()); GUI.color = o; }
         GUI.Label(new Rect(ColX(2), 10f, 90f, 19f), "Wave");
         GUI.Label(new Rect(ColX(1), 10f, 90f, 19f), "Ping");
         GUI.Label(new Rect(ColX(0), 10f, 100f, 19f), "Region");

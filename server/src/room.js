@@ -38,7 +38,7 @@ const MAX_BODY = 8192; // max size of one message body
 const MAX_FRAME = 65536;
 // body length of the compact state messages by kind (C_STATE: op, kind, view i64, payload)
 const STATE_LEN = { 1: 24, 2: 38, 3: 22 };
-const MAX_MSGS_PER_FRAME = 512;
+const MAX_MSGS_PER_FRAME = 2048; // free plan: clients batch at a fixed rate (10-15 Hz), so one frame can carry several game frames of messages
 // per socket message budget (messages per second, burst = 2 s): the host sends about 20 a second per zombie alive at 20 Hz state when a client
 // has no WebRTC lane (300 zombies: ~6500/s, measured with server/test/e2e/fps.mjs ?p2p=0), a client far fewer. Frames (what the Durable Object
 // is billed for) stay at ~20-60 a second whatever the count: the messages are batched per game frame.
@@ -47,7 +47,11 @@ const MAX_BUFFER_ENTRIES = 20000;
 const MAX_BUFFER_PER_SENDER = 8000;
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 const SNAPSHOT_MAX = 1_500_000;
-const ALARM_MS = 25_000;
+const ALARM_MS = 40_000; // every alarm is a billed request (free plan budget, docs/MULTIPLAYER.md); limbo / restart deadlines schedule earlier ones
+const LOBBY_BEAT_MS = 75_000, LOBBY_VOLATILE_MS = 30_000; // lobby entry refresh (it expires after 150 s) / at most this often for wave-only changes
+// Keepalive (free plan): a page that has nothing else to send says "zbka" every few seconds; the runtime answers "zbka" itself
+// (setWebSocketAutoResponse), so the Durable Object is not woken and no wall-clock time is billed. The silence check reads its timestamp.
+const KEEPALIVE = "zbka";
 const MAX_PLAYER_ID = 250;
 // Phase 2 (docs/design/PHASE2-WEBRTC.md): JSON text frames on the same socket carry WebRTC signaling and the
 // "data channel is up" flag. Binary frames are untouched.
@@ -102,6 +106,8 @@ export class Room extends DurableObject {
     this.msgRate = new WeakMap();
     this.dirty = false;
     this.score = null; // phase 5: latest C_SCORE of the host {rules, wave, list: [[name, kills]]}
+    this.lobbyKey = ""; this.lobbyAt = 0; this.lobbyWave = -1;
+    try { ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(KEEPALIVE, KEEPALIVE)); } catch (e) { console.log("autoresponse unavailable", String(e)); }
     ctx.blockConcurrencyWhile(async () => {
       this.meta = (await ctx.storage.get("meta")) || null;
       const snap = await ctx.storage.get("buf");
@@ -382,8 +388,20 @@ export class Room extends DurableObject {
     if (!this.takeTokens(ws, att, frame.length)) return;
 
     const out = new Map(); // ws -> bodies
-    const emit = (target, body) => { let l = out.get(target); if (!l) out.set(target, (l = [])); l.push(body); };
-    const ctx = { stamp: null, seqOf: new Map() }; // sender clock of this frame (C_TIME), passed on to every recipient; body -> buffer seq
+    // Sender clock: a frame may carry several C_TIME (the page batches a few game frames into one WebSocket frame at a fixed rate). Each
+    // recipient gets an S_TIME in front of the first message it receives after each clock reading (lazily, so a recipient that gets nothing
+    // after a reading never sees it). One reading per frame = exactly the old behaviour (S_TIME first).
+    const sent = new Map(); // ws -> stamp version last put in front of its messages
+    const ctx = { stamp: null, ver: 0, seqOf: new Map() }; // body -> buffer seq
+    const emit = (target, body) => {
+      let l = out.get(target); if (!l) out.set(target, (l = []));
+      if (ctx.stamp && target !== ws && sent.get(target) !== ctx.ver) {
+        sent.set(target, ctx.ver);
+        const t = new Uint8Array(9); t[0] = S_TIME; putI32(t, 1, att.id); t.set(ctx.stamp, 5);
+        l.push(t);
+      }
+      l.push(body);
+    };
     let o = 0, count = 0;
     while (o + 2 <= frame.length && count++ < MAX_MSGS_PER_FRAME) {
       const len = frame[o] | (frame[o + 1] << 8); o += 2;
@@ -396,10 +414,6 @@ export class Room extends DurableObject {
     // recipient can interpolate on the sender's timeline (S_TIME: i32 sender, u32 clock). Protocol 3 recipients get the
     // newest buffer sequence number of the frame at its end (S_SEQ), which is what a resume asks from.
     for (const [target, bodies] of out) {
-      if (ctx.stamp && target !== ws) {
-        const t = new Uint8Array(9); t[0] = S_TIME; putI32(t, 1, att.id); t.set(ctx.stamp, 5);
-        bodies.unshift(t);
-      }
       if (ctx.seqOf.size && this.verOf(target) === 3) {
         let ms = -1;
         for (const b of bodies) { const s = ctx.seqOf.get(b); if (s !== undefined && s > ms) ms = s; }
@@ -569,7 +583,7 @@ export class Room extends DurableObject {
         return;
       }
       case C_TIME: {
-        if (b.length === 5) ctx.stamp = b.slice(1, 5);
+        if (b.length === 5) { ctx.stamp = b.slice(1, 5); ctx.ver++; }
         return;
       }
       case C_STATE: {
@@ -812,8 +826,9 @@ export class Room extends DurableObject {
     for (const [id, w] of [...this.players]) {
       const i = this.wsInfo.get(w);
       if (!i || i.v !== 3 || this.vis.get(id) === false) continue;
-      const seen = this.lastSeen.get(id);
+      let seen = this.lastSeen.get(id);
       if (seen === undefined) { this.lastSeen.set(id, now); continue; }
+      try { const ka = this.ctx.getWebSocketAutoResponseTimestamp(w); if (ka && ka.getTime() > seen) seen = ka.getTime(); } catch {}
       if (now - seen > (this.meta.staleMs || STALE_MS)) {
         const a = w.deserializeAttachment();
         if (a && !a.gone) { this.enterLimbo(w, a); try { w.close(4002, "silent"); } catch {} }
@@ -899,10 +914,21 @@ export class Room extends DurableObject {
 
   lobby() { return this.env.LOBBY.get(this.env.LOBBY.idFromName("lobby")); }
 
-  lobbyUpdate() {
+  // Every call to the Lobby is a billed Durable Object request (free plan budget): changes that matter for joining (players, listing,
+  // started / ended, name) go out at once, a wave-only change at most every 30 s, otherwise a heartbeat every 75 s (entries live 150 s).
+  lobbyUpdate(force = false) {
     const m = this.meta;
     if (!m) return;
-    if (!m.listed || m.restart) { this.lobby().remove(m.code).catch(() => {}); return; } // a room waiting for a new host is not offered to anybody
+    const now = Date.now();
+    const listed = m.listed && !m.restart;
+    const players = m.restart ? 0 : this.players.size + this.limbo.size;
+    const key = listed ? [players, m.max, !!m.started, !!m.ended, m.name, m.comment, m.type, !!m.pw, !!m.quick].join("|") : "-";
+    const wave = m.wave || 0;
+    const due = force || key !== this.lobbyKey || (listed && ((wave !== this.lobbyWave && (this.lobbyWave <= 0 || now - this.lobbyAt >= LOBBY_VOLATILE_MS)) || now - this.lobbyAt >= LOBBY_BEAT_MS));
+    if (!due) return;
+    const prev = this.lobbyKey;
+    this.lobbyKey = key; this.lobbyAt = now; this.lobbyWave = wave;
+    if (!listed) { if (prev !== "-" || force) this.lobby().remove(m.code).catch(() => {}); return; } // a room waiting for a new host is not offered to anybody
     this.lobby().upsert({
       code: m.code, name: m.name, players: m.restart ? 0 : this.players.size + this.limbo.size, max: m.max, type: m.type, pw: !!m.pw, comment: m.comment,
       wave: m.wave || 0, started: !!m.started, ended: !!m.ended, created: m.created, colo: m.colo || "", country: m.country || "",

@@ -46,7 +46,11 @@ check("everyone sees 3 players", da.players.length === 3 && db.players.length ==
 check("room list shows 3/16", (await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json())[0].players === 3);
 
 // --- start the match ---
-await A.click_(640, 360); await A.keyboard.press("Enter"); await A.waitForTimeout(12000);
+await A.click_(640, 360); await A.keyboard.press("Enter");
+// idle test players get eaten (Timed waves scale the zombie count with the players since the playtest changes): keep everybody alive
+const healPages = [A, B, C];
+const healer = setInterval(() => { for (const p of healPages) if (p && !p.isClosed()) p.evaluate(() => window.unityInstance && window.unityInstance.SendMessage("ZbNetRunner", "DebugHeal", "")).catch(() => {}); }, 700);
+await A.waitForTimeout(12000);
 da = await A.dump(); db = await B.dump(); dc = await C.dump();
 check("wave started everywhere (zombies > 0)", da.zombies > 0 && db.zombies > 0 && dc.zombies > 0, J([da.zombies, db.zombies, dc.zombies]));
 check("zombie counts match", da.zombies === db.zombies && db.zombies === dc.zombies, J([da.zombies, db.zombies, dc.zombies]));
@@ -126,7 +130,7 @@ check("B's avatar position matches on host (or B died: skipped)", !bOnB || !bOnA
 }
 
 // --- late join (D) ---
-const D = await game(b, "D", P2P ? withQ(BASE, "p2p=0") : BASE);
+const D = await game(b, "D", P2P ? withQ(BASE, "p2p=0") : BASE); healPages.push(D);
 await D.click_(750, 281); await D.click_(750, 431); await D.waitForTimeout(800);
 await D.click_(850, 265); await D.keyboard.press("Control+a"); await D.keyboard.type(code.toLowerCase(), { delay: 30 });
 await D.click_(750, 431); await D.waitForTimeout(6000);
@@ -167,6 +171,7 @@ await D.shot("d_after_host_left.png");
 const after = await (await fetch(new URL("/api/rooms", BASE), TEST_FETCH)).json();
 check("room stays in the list under the same code, hosted by D", after.length === 1 && after[0].code === code && after[0].players === 1, J(after));
 
+clearInterval(healer);
 console.log(`${pass} passed, ${fail} failed`);
 await Promise.race([b.close(), new Promise((r) => setTimeout(r, 3000))]);
 process.exit(fail ? 1 : 0);

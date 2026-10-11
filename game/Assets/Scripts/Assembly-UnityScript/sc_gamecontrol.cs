@@ -733,6 +733,7 @@ public class sc_gamecontrol : MonoBehaviour
 		cam.localEulerAngles = Vector3.zero;
 		Application.LoadLevel(2);
 		ZbMenu.HostLeftScreen(this); // phase 4: "host left" screen, the group continues in a new match (claim restart)
+		ZbMenu.QuotaScreen(this); // free plan quota used up: explain it (single player still works) instead of "You left the game"
 	}
 
 	public void OnConnectedToServer()

@@ -24,6 +24,7 @@ public static partial class ZbNet
     static string claimCode = "";
 
     public static int lastEndReason;   // reject reason that ended the last session (4 host left, 5 kicked, ...); 0 = connection lost / own leave
+    public const int R_QUOTA = 11;     // the Worker refused the socket: the free plan's daily Durable Object quota is used up (until 00:00 UTC)
     public static int hostState;       // S_HOST_STATE: 0 ok, 1 host connection lost, 2 host tab hidden, 3 host left (restarting)
     static float hostStateUntil;
     public static bool restartPending; // the relay announced that a new match is being set up (the host left)

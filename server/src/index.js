@@ -1,6 +1,7 @@
 // Zumbi Blocks Worker: static WebGL build + room list + WebSocket relay (Durable Object per room).
 export { Room } from "./room.js";
 export { Lobby } from "./lobby.js";
+import { publicRows, quickplayRows } from "./lobby.js";
 import { bumpStats, checkToken, cleanName, implausible, leaderboardResponse, makeToken, recordRun, statsResponse, utcDay } from "./scores.js";
 import { creditStats, handleAccount, isTestRequest, protectNames, sessionAccount } from "./accounts.js";
 
@@ -54,6 +55,35 @@ function rejectSocket(reason) {
   return new Response(null, { status: 101, webSocket: client });
 }
 
+// ---- free plan budget (docs/MULTIPLAYER.md "Free plan budget") ---------------------------------------------------------------------
+// The Workers Free plan allows 100,000 Durable Object requests a day (incoming WebSocket messages count 20:1), reset at 00:00 UTC. Once it is
+// used up every Durable Object call throws "Exceeded allowed volume of requests in Durable Objects free tier." Online play needs the Room / Lobby
+// objects, so it stops until the reset; the Worker answers with a clear error (JSON 503 {error: "quota"} / a socket that carries REJECT(11))
+// and the game explains it. Single player does not need any Durable Object.
+const R_QUOTA = 11;
+function isQuota(e) { return /exceeded allowed volume|free tier|daily (request )?limit/i.test(String(e && (e.message || e))); }
+function nextUtcMidnight(now = Date.now()) { const d = new Date(now); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1); }
+function doError(e) {
+  const quota = isQuota(e);
+  console.log(quota ? "do-quota" : "do-error", String(e && (e.message || e)).slice(0, 200));
+  return Response.json(quota ? { error: "quota", resetAt: nextUtcMidnight() } : { error: "unavailable" }, { status: 503, headers: { "cache-control": "no-store", "retry-after": "60" } });
+}
+
+// The room list (Lobby DO) cached at the edge for a few seconds: an open server list polls every 10 s and Quick Play asks once, so most of
+// these are answered without a Durable Object request. Local tests (ZB_TEST) bypass it unless they ask for it (header x-zb-cache: 1).
+const ROWS_TTL_S = 5;
+async function lobbyRows(env, request, ctx) {
+  const useCache = typeof caches !== "undefined" && (!env.ZB_TEST || request.headers.get("x-zb-cache") === "1");
+  const key = new Request("https://zb-cache.invalid/lobby-rows");
+  if (useCache) {
+    const hit = await caches.default.match(key).catch(() => null);
+    if (hit) return { rows: await hit.json(), cached: true };
+  }
+  const rows = await env.LOBBY.get(env.LOBBY.idFromName("lobby")).rows();
+  if (useCache) ctx.waitUntil(caches.default.put(key, new Response(JSON.stringify(rows), { headers: { "content-type": "application/json", "cache-control": `public, max-age=${ROWS_TTL_S}` } })).catch(() => {}));
+  return { rows, cached: false };
+}
+
 const TYPES = { ".wasm": "application/wasm", ".js": "application/javascript", ".data": "application/octet-stream", ".json": "application/json" };
 
 async function readJson(request) {
@@ -97,8 +127,22 @@ async function soloScore(request, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    try { return await handle(request, env, ctx); }
+    catch (e) {
+      // a Durable Object call failed (free plan quota used up, or the object is unavailable): never a bare 1101
+      const p = new URL(request.url).pathname;
+      if (p.startsWith("/ws/") && request.headers.get("Upgrade") === "websocket") { console.log(isQuota(e) ? "do-quota" : "do-error", String(e && (e.message || e)).slice(0, 200)); return rejectSocket(isQuota(e) ? R_QUOTA : 1); }
+      return doError(e);
+    }
+  },
+};
+
+async function handle(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+    // local tests only (wrangler dev --var ZB_TEST:1): cookie zbquota=1 makes every Durable Object path fail like a used-up free plan
+    if (env.ZB_TEST && /(^|;\s*)zbquota=1/.test(request.headers.get("cookie") || "") && /^\/(ws\/|api\/(rooms|room\/|ping\/|quickplay))/.test(path))
+      throw new Error("Exceeded allowed volume of requests in Durable Objects free tier.");
 
     if (path.startsWith("/api/")) {
       const ip = clientIp(request, env);
@@ -109,13 +153,22 @@ export default {
     // ---- player profiles + cloud save (docs/ACCOUNTS.md) ----
     if (path.startsWith("/api/account/")) {
       const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
-      const allow = async (key, [lim, win]) => { try { return await lobby.hit(key, lim, win); } catch { return true; } };
+      // cloud saves are frequent: their limit is counted in this isolate (no Durable Object request); the rare ones (signup, login, ...) in the Lobby
+      const allow = async (key, [lim, win]) => { if (key.startsWith("asv:")) return localHit(key, lim, win); try { return await lobby.hit(key, lim, win); } catch { return true; } };
       return handleAccount(request, env, ctx, { ip: clientIp(request, env), allow });
     }
 
     // ---- phase 5: leaderboards, solo results, game counts (docs/LEADERBOARD.md) ----
     if (path === "/api/leaderboard") return leaderboardResponse(request, env, ctx);
-    if (path === "/api/stats") return statsResponse(env);
+    if (path === "/api/stats") {
+      // D1 only, but cached for a minute anyway (the web page polls it)
+      const key = new Request("https://zb-cache.invalid/stats");
+      const hit = typeof caches !== "undefined" && !env.ZB_TEST ? await caches.default.match(key).catch(() => null) : null;
+      if (hit) return hit;
+      const res = await statsResponse(env);
+      if (typeof caches !== "undefined" && !env.ZB_TEST && res.ok) { const body = await res.clone().text(); ctx.waitUntil(caches.default.put(key, new Response(body, { headers: { "content-type": "application/json", "cache-control": "public, max-age=60" } })).catch(() => {})); }
+      return res;
+    }
     if (path === "/api/run" || path === "/api/score") {
       if (request.method !== "POST") return Response.json({ error: "POST only" }, { status: 405, ...noStore });
       if (!env.DB) return Response.json({ ok: false, error: "no database" }, { status: 503, ...noStore });
@@ -129,9 +182,9 @@ export default {
     }
 
     if (path === "/api/rooms") {
-      const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
-      const rooms = await lobby.list(isTestRequest(request)); // automated tests (cookie zbtest=1) only ever see their own rooms, everybody else never sees them
-      return Response.json(rooms, { headers: { "cache-control": "no-store" } });
+      const { rows, cached } = await lobbyRows(env, request, ctx);
+      const rooms = publicRows(rows, isTestRequest(request)); // automated tests (cookie zbtest=1) only ever see their own rooms, everybody else never sees them
+      return Response.json(rooms, { headers: { "cache-control": "no-store", "x-zb-cached": cached ? "1" : "0" } });
     }
 
     if (path.startsWith("/api/room/") || path.startsWith("/api/ping/")) {
@@ -145,9 +198,9 @@ export default {
 
     if (path === "/api/quickplay") {
       const cf = request.cf || {};
-      const lobby = env.LOBBY.get(env.LOBBY.idFromName("lobby"));
-      const rooms = await lobby.quickplay(url.searchParams.get("type") || "", Number(cf.latitude) || 0, Number(cf.longitude) || 0, isTestRequest(request));
-      return Response.json(rooms, { headers: { "cache-control": "no-store" } });
+      const { rows, cached } = await lobbyRows(env, request, ctx);
+      const rooms = quickplayRows(rows, url.searchParams.get("type") || "", Number(cf.latitude) || 0, Number(cf.longitude) || 0, isTestRequest(request));
+      return Response.json(rooms, { headers: { "cache-control": "no-store", "x-zb-cached": cached ? "1" : "0" } });
     }
 
     if (path === "/ws/host" || path.startsWith("/ws/room/")) {
@@ -214,5 +267,4 @@ export default {
     }
 
     return env.ASSETS.fetch(request);
-  },
-};
+}

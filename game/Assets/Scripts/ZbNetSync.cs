@@ -21,6 +21,9 @@ public static class ZbCfg
     public static string p2pMode = "";
     public static float rate = 30f;        // value for sc_player.sendrate / sc_zumbi.sendrate (the original used 10 = 8..10 updates/s)
     public static float minDelay = 100f;   // ms, interpolation delay floor
+    // Free plan budget (docs/MULTIPLAYER.md "Free plan budget"): WebSocket frames to the relay are billed, so outgoing traffic is flushed at a
+    // fixed rate instead of once per rendered frame (every message still goes, coalesced). ?flush=HZ overrides both, ?flush=0 = every frame (old).
+    public static float flushHost = 15f, flushClient = 10f;
     public static string query = "";
     static bool loaded;
 
@@ -45,6 +48,7 @@ public static class ZbCfg
                 case "stats": statsOn = v == "1"; break;
                 case "p2p": p2pMode = v; p2p = v != "0"; break;
                 case "resume": resume = v != "0"; break;
+                case "flush": if (float.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out f)) { flushHost = f; flushClient = f; } break;
             }
         }
     }
