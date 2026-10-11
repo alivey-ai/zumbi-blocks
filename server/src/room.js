@@ -13,12 +13,21 @@ import { creditStats, protectNames } from "./accounts.js";
 // client -> relay
 const C_RPC = 1, C_INST = 2, C_DESTROY = 3, C_REMOVE_RPCS = 4, C_DESTROY_PLAYER = 5, C_KICK = 6, C_PING = 7, C_LISTING = 8, C_TIME = 9, C_ECHO = 10, C_STATE = 11,
   C_META = 16, C_VIS = 17, // 12-15 reserved (phase 1/2); 18 C_SNAP and 19 C_ADOPTED are reserved for host migration level C (not built)
-  C_SCORE = 20; // phase 5: host's per-player kills for the leaderboard
+  C_SCORE = 20, // phase 5: host's per-player kills for the leaderboard
+  // phase 2b (docs/MULTIPLAYER.md "Data channel lane"): clients with a reliable WebRTC channel to the host send everything to the host directly;
+  // the host is their gateway and the relay keeps the buffer for late joiners / resumes and serves the peers without a direct connection.
+  C_SKIP = 21,  // host: u8 n, n x i32: clients that get the host's traffic over their data channel (the relay does not forward host messages to them)
+  C_FWD = 22,   // host: i32 asSender, i32 only (-1 = normal routing), u8 flags (1 buffer bookkeeping, 2 clock, 4 tag), [u32 clock], [u32 tag], inner message
+  C_FENCE = 23, // i32 target, u32 id: S_FENCE to the target (clients: only the host) - "everything I sent you over the relay before this has arrived"
+  C_UP = 24;    // client: u32 tag, inner message: to the host only (resend of what a dead data channel may have lost), no bookkeeping
 // relay -> client
 const S_WELCOME = 0x81, S_RPC = 0x82, S_INST = 0x83, S_DESTROY = 0x84, S_CONNECTED = 0x85, S_DISCONNECTED = 0x86,
   S_REJECT = 0x87, S_PONG = 0x88, S_PING_INFO = 0x89, S_SYNC_DONE = 0x8a, S_TIME = 0x8b, S_ECHO = 0x8c, S_STATE = 0x8d,
   S_SEQ = 0x8e, S_HOST_STATE = 0x8f, // phase 4; 0x90-0x94 reserved (host change / snapshot / roster, level C), unused
-  S_COUNTDOWN = 0x95, S_RESULT = 0x96;
+  S_COUNTDOWN = 0x95, S_RESULT = 0x96,
+  S_FENCE = 0x97, // i32 sender, u32 id
+  S_TAG = 0x98;   // u32 tag, i32 from: the next message is a resend of the data channel message with this sequence number (receiver drops duplicates)
+const FWD_INNER = new Set([C_RPC, C_INST, C_DESTROY, C_REMOVE_RPCS, C_DESTROY_PLAYER, C_STATE]);
 // reject / close reasons
 export const R_NOT_FOUND = 1, R_BAD_PASSWORD = 2, R_FULL = 3, R_HOST_LEFT = 4, R_KICKED = 5, R_RATE = 6, R_PROTO = 7,
   R_REPLACED = 8, R_HOST_AWAY = 9, R_EXPIRED = 10;
@@ -101,6 +110,7 @@ export class Room extends DurableObject {
     this.tomb = []; // {root, instSeq, t}: destroyed roots, replayed as S_DESTROY to a resuming client that had them
     this.lastSweep = 0;
     this.dcUp = new Set(); // ids of clients whose host->client state travels over their WebRTC data channel
+    this.skip = new Set(); // phase 2b: ids of clients that get the host's messages over their reliable data channel (C_SKIP)
     this.sigRate = new WeakMap();
     this.rate = new WeakMap();
     this.msgRate = new WeakMap();
@@ -121,6 +131,7 @@ export class Room extends DurableObject {
           this.players.set(a.id, ws); this.wsInfo.set(ws, { id: a.id, v: a.v || 2 });
           this.bufOps.set(a.id, -1); this.lastSeen.set(a.id, now);
           if (a.dc && !a.host) this.dcUp.add(a.id);
+          if (a.host && Array.isArray(a.skip)) this.skip = new Set(a.skip);
         }
       }
     });
@@ -244,7 +255,7 @@ export class Room extends DurableObject {
     }
     this.limbo.delete(id); this.persistLimbo();
     const ntok = newToken();
-    server.serializeAttachment({ id, host: !!rec.host, ipid: rec.ipid, rtc: !!rec.rtc, v: 3, tok: ntok });
+    server.serializeAttachment({ id, host: !!rec.host, ipid: rec.ipid, rtc: !!rec.rtc, v: 3, tok: ntok, ...(rec.host && this.skip.size ? { skip: [...this.skip] } : {}) });
     this.players.set(id, server); this.wsInfo.set(server, { id, v: 3 }); this.lastSeen.set(id, Date.now());
     this.bufOps.set(id, rec.bufOps);
     this.sendNow(server, [this.welcome(id, !!rec.host, { tok: ntok, flags: 1, accepted: rec.bufOps < 0 ? 0xffffffff : rec.bufOps })]);
@@ -275,7 +286,7 @@ export class Room extends DurableObject {
     this.resetBuffer();
     this.limbo.clear(); this.persistLimbo();
     this.pendingToHost = []; this.pendingBytes = 0; this.tomb = [];
-    this.vis.clear(); this.bufOps.clear(); this.lastRtt.clear(); this.dcUp.clear();
+    this.vis.clear(); this.bufOps.clear(); this.lastRtt.clear(); this.dcUp.clear(); this.skip.clear();
     Object.assign(m, { restart: null, nextId: 1, started: false, ended: false, wave: 0, alive: 0, bufGen: newToken().slice(0, 8), startedAt: 0, recorded: false, score: null,
       carryStartedAt: r.wave > 1 ? r.startedAt || 0 : 0 });
     this.score = null;
@@ -392,12 +403,12 @@ export class Room extends DurableObject {
     // recipient gets an S_TIME in front of the first message it receives after each clock reading (lazily, so a recipient that gets nothing
     // after a reading never sees it). One reading per frame = exactly the old behaviour (S_TIME first).
     const sent = new Map(); // ws -> stamp version last put in front of its messages
-    const ctx = { stamp: null, ver: 0, seqOf: new Map() }; // body -> buffer seq
+    const ctx = { stamp: null, ver: 0, from: att.id, seqOf: new Map() }; // body -> buffer seq; from = whose clock the stamp is (C_FWD: the forwarded client)
     const emit = (target, body) => {
       let l = out.get(target); if (!l) out.set(target, (l = []));
       if (ctx.stamp && target !== ws && sent.get(target) !== ctx.ver) {
         sent.set(target, ctx.ver);
-        const t = new Uint8Array(9); t[0] = S_TIME; putI32(t, 1, att.id); t.set(ctx.stamp, 5);
+        const t = new Uint8Array(9); t[0] = S_TIME; putI32(t, 1, ctx.from); t.set(ctx.stamp, 5);
         l.push(t);
       }
       l.push(body);
@@ -413,14 +424,20 @@ export class Room extends DurableObject {
     // One WebSocket frame per recipient for everything this frame produced; with the sender's clock in front so the
     // recipient can interpolate on the sender's timeline (S_TIME: i32 sender, u32 clock). Protocol 3 recipients get the
     // newest buffer sequence number of the frame at its end (S_SEQ), which is what a resume asks from.
+    // phase 2b: a client on the host's data channel got the host's buffered entries directly; it still learns their sequence numbers (what a
+    // resume continues from), or a resume would replay them a second time
+    let maxAll = -1;
+    if (att.host && ctx.seqOf.size && this.skip.size) for (const s of ctx.seqOf.values()) if (s > maxAll) maxAll = s;
     for (const [target, bodies] of out) {
       if (ctx.seqOf.size && this.verOf(target) === 3) {
         let ms = -1;
         for (const b of bodies) { const s = ctx.seqOf.get(b); if (s !== undefined && s > ms) ms = s; }
+        if (maxAll >= 0) { const ti = this.wsInfo.get(target); if (ti && this.skip.has(ti.id)) ms = maxAll; }
         if (ms >= 0) bodies.push(seqMsg(ms));
       }
       this.sendNow(target, bodies);
     }
+    if (maxAll >= 0) for (const id of this.skip) { const w = this.players.get(id); if (w && !out.has(w) && this.verOf(w) === 3) this.sendNow(w, [seqMsg(maxAll)]); }
   }
 
   // WebRTC signaling and data channel flag (JSON text frames). Everything malformed is dropped silently.
@@ -494,7 +511,7 @@ export class Room extends DurableObject {
   handle(ws, att, b, emit, ctx = {}) {
     const me = att.id;
     // buffered operations are counted per player: after a resume the relay tells the client how many it got, the client re-sends the rest
-    if (att.v === 3 && (b[0] === C_INST || b[0] === C_DESTROY || b[0] === C_REMOVE_RPCS || b[0] === C_DESTROY_PLAYER || (b[0] === C_RPC && (b[1] === 5 || b[1] === 6)))) {
+    if (att.v === 3 && (b[0] === C_INST || b[0] === C_DESTROY || b[0] === C_REMOVE_RPCS || b[0] === C_DESTROY_PLAYER || (b[0] === C_RPC && (b[1] === 5 || b[1] === 6)) || (b[0] === C_FWD && b.length > 9 && (b[9] & 1)))) {
       const c = this.bufOps.get(me);
       if (c !== -1) this.bufOps.set(me, ((c || 0) + 1) >>> 0);
     }
@@ -508,7 +525,8 @@ export class Room extends DurableObject {
         const root = rootOf(view);
         const out = new Uint8Array(b.length + 4); out[0] = S_RPC; putI32(out, 1, me); out.set(b.subarray(1), 5);
 
-        if (buffered && name === "killmebuffered") {
+        if (ctx.noBook) { /* phase 2b: a targeted delivery (C_FWD only / C_UP): no buffer side effects */ }
+        else if (buffered && name === "killmebuffered") {
           // Net effect of instantiate + kill is nothing: drop the object's history. A kill for an object that
           // is already gone is an echo (every peer's OnDestroy re-sends it), so swallow it.
           if (!this.alive.has(root)) return;
@@ -522,7 +540,7 @@ export class Room extends DurableObject {
           if (me !== 0) { const h = this.players.get(0); if (h) emit(h, out); else if (this.limbo.has(0)) this.queueToHost(out); }
           return;
         }
-        for (const [id, w] of this.players) if (id !== me) emit(w, out);
+        for (const [id, w] of this.players) if (id !== me && !(att.host && !ctx.fwd && this.skip.has(id))) emit(w, out);
         return;
       }
       case C_INST: {
@@ -531,36 +549,39 @@ export class Room extends DurableObject {
         if (ownerOf(view) !== me && !(att.host && view >= SCENE_BASE)) return; // can only create own objects
         const root = rootOf(view);
         const out = new Uint8Array(b.length + 4); out[0] = S_INST; putI32(out, 1, me); out.set(b.subarray(1), 5);
-        const e = this.addBuffer(0, me, root, out);
-        if (!e) return;
-        ctx.seqOf?.set(out, e.seq);
-        this.alive.add(root);
-        for (const [id, w] of this.players) if (id !== me) emit(w, out);
+        if (!ctx.noBook) {
+          const e = this.addBuffer(0, me, root, out);
+          if (!e) return;
+          ctx.seqOf?.set(out, e.seq);
+          this.alive.add(root);
+        }
+        for (const [id, w] of this.players) if (id !== me && !(att.host && !ctx.fwd && this.skip.has(id))) emit(w, out);
         return;
       }
       case C_DESTROY: {
         if (b.length < 9) return;
         const root = rootOf(readView(b, 1));
         if (ownerOf(root) !== me && !att.host) return;
-        this.dropRoot(root);
+        if (!ctx.noBook) this.dropRoot(root);
         const out = new Uint8Array(9); out[0] = S_DESTROY; putView(out, 1, root);
-        for (const [id, w] of this.players) if (id !== me) emit(w, out);
+        for (const [id, w] of this.players) if (id !== me && !(att.host && !ctx.fwd && this.skip.has(id))) emit(w, out);
         return;
       }
       case C_REMOVE_RPCS: {
         const p = i32(b, 1);
         if (p !== me && !att.host) return;
-        this.removeWhere((e) => e.kind === 1 && e.sender === p);
+        if (!ctx.noBook) this.removeWhere((e) => e.kind === 1 && e.sender === p);
         return;
       }
       case C_DESTROY_PLAYER: {
         const p = i32(b, 1);
         if (p !== me && !att.host) return;
+        if (ctx.noBook) return;
         const roots = [...this.alive].filter((r) => ownerOf(r) === p);
         for (const r of roots) {
           this.dropRoot(r);
           const out = new Uint8Array(9); out[0] = S_DESTROY; putView(out, 1, r);
-          for (const w of this.players.values()) emit(w, out);
+          for (const w of this.players.values()) emit(w, out, true); // everybody, data channel clients too (destroying is final, order does not matter)
         }
         this.removeWhere((e) => e.kind === 1 && e.sender === p);
         return;
@@ -647,6 +668,60 @@ export class Room extends DurableObject {
           o += 3 + nl;
         }
         this.score = { rules, wave: b[2] | (b[3] << 8), list };
+        return;
+      }
+      case C_SKIP: {
+        // host: the clients it serves over their reliable data channel (in order with its other messages, so it switches exactly here)
+        if (!att.host || b.length < 2 || b.length !== 2 + 4 * b[1]) return;
+        const ids = []; for (let i = 0; i < b[1]; i++) { const id = i32(b, 2 + 4 * i); if (id > 0) ids.push(id); }
+        this.skip = new Set(ids);
+        try { const a = ws.deserializeAttachment(); if (a) { a.skip = ids; ws.serializeAttachment(a); } } catch {}
+        return;
+      }
+      case C_FENCE: {
+        if (b.length !== 9) return;
+        const target = i32(b, 1);
+        if (target === me || (!att.host && target !== 0)) return;
+        const w = this.players.get(target);
+        if (!w) return;
+        const out = new Uint8Array(9); out[0] = S_FENCE; putI32(out, 1, me); out.set(b.subarray(5, 9), 5);
+        emit(w, out);
+        return;
+      }
+      case C_FWD: {
+        // host: a message of client `as` that came to the host over the data channel (or an own message for a client that lost its channel)
+        if (!att.host || b.length < 11) return;
+        const as = i32(b, 1), only = i32(b, 5), flags = b[9];
+        let o = 10, stamp = null, tag = null;
+        if (flags & 2) { stamp = b.slice(o, o + 4); o += 4; }
+        if (flags & 4) { tag = new Uint8Array(9); tag[0] = S_TAG; tag.set(b.subarray(o, o + 4), 1); putI32(tag, 5, as); o += 4; }
+        const inner = b.subarray(o);
+        if (inner.length < 1 || !FWD_INNER.has(inner[0])) return;
+        if (as !== 0 && !this.players.has(as) && !this.limbo.has(as)) return;
+        const isState = inner[0] === C_STATE;
+        const emitF = (target, body, force) => {
+          if (target === ws) return; // the host handled it already
+          const ti = this.wsInfo.get(target); const tid = ti ? ti.id : -1;
+          if (only >= 0) { if (tid !== only) return; }
+          else if (isState ? this.dcUp.has(tid) : !force && this.skip.has(tid)) return;
+          if (tag) emit(target, tag);
+          emit(target, body);
+        };
+        const sv = ctx.stamp, sf = ctx.from;
+        ctx.stamp = stamp; ctx.from = as; ctx.ver++;
+        try { this.handle(ws, { id: as, host: as === 0, v: 0 }, inner, emitF, { noBook: !(flags & 1) || only >= 0, seqOf: ctx.seqOf, fwd: true }); }
+        finally { ctx.stamp = sv; ctx.from = sf; ctx.ver++; }
+        return;
+      }
+      case C_UP: {
+        // client: resend of what its data channel to the host may have lost; the host only, tagged, no bookkeeping (the host forwards it)
+        if (att.host || b.length < 6) return;
+        const inner = b.subarray(5);
+        if (!FWD_INNER.has(inner[0]) || inner[0] === C_STATE) return;
+        const h = this.players.get(0);
+        if (!h) return;
+        const tag = new Uint8Array(9); tag[0] = S_TAG; tag.set(b.subarray(1, 5), 1); putI32(tag, 5, me);
+        this.handle(ws, { id: me, host: false, v: 0 }, inner, (target, body) => { if (target === h) { emit(h, tag); emit(h, body); } }, { noBook: true, seqOf: ctx.seqOf, fwd: true });
         return;
       }
       case C_LISTING: {
@@ -857,7 +932,7 @@ export class Room extends DurableObject {
     this.recordMatch("closed");
     const code = this.meta.code, listed = this.meta.listed;
     const sockets = [...this.players.values()];
-    this.meta = null; this.buf = []; this.byRoot.clear(); this.alive.clear(); this.players.clear(); this.limbo.clear(); this.dcUp.clear(); this.bytes = 0;
+    this.meta = null; this.buf = []; this.byRoot.clear(); this.alive.clear(); this.players.clear(); this.limbo.clear(); this.dcUp.clear(); this.skip.clear(); this.bytes = 0;
     this.vis.clear(); this.bufOps.clear(); this.pendingToHost = []; this.pendingBytes = 0; this.tomb = [];
     for (const w of sockets) { this.sendNow(w, [this.msg(S_REJECT, [reason])]); try { w.close(1000, "room closed"); } catch {} }
     try { await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll(); } catch {}

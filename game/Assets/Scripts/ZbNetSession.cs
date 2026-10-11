@@ -47,7 +47,7 @@ public static partial class ZbNet
     static void NoteBuffered()
     {
         byte op = w.b[0];
-        if (!(op == C_INST || op == C_DESTROY || op == C_REMOVE_RPCS || op == C_DESTROY_PLAYER || (op == C_RPC && (w.b[1] == 5 || w.b[1] == 6)))) return;
+        if (!(op == C_INST || op == C_DESTROY || op == C_REMOVE_RPCS || op == C_DESTROY_PLAYER || (op == C_RPC && (w.b[1] == 5 || w.b[1] == 6)) || (op == C_FWD && w.n > 9 && (w.b[9] & 1) != 0))) return;
         sentBuffered++;
         var copy = new byte[w.n]; Buffer.BlockCopy(w.b, 0, copy, 0, w.n);
         ring.Add(copy); ringBytes += copy.Length;
@@ -137,6 +137,7 @@ public static partial class ZbNet
             else if (missing < 0) sentBuffered = welcomeAccepted;
         }
         nextPing = 0; nextEcho = 0;
+        DirectResumed(); // phase 2b: the relay's skip list again, resends that waited for the socket
         Debug.Log("[zbnet] RESUMED id " + localId + " after " + attempt + " attempts, re-sent " + resent + " buffered operations, seq " + lastSeq);
         attempt = 0;
     }

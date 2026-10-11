@@ -136,6 +136,10 @@ mergeInto(LibraryManager.library, {
   ZbRtcLastArrival: function () { return window.zbrtc ? window.zbrtc.lastArrival : 0; },
   ZbRtcClosePeer: function (id) { if (window.zbrtc) window.zbrtc.closePeer(id); },
   ZbRtcStat: function (id, which) { return window.zbrtc ? window.zbrtc.stat(id, which) : 0; },
+  // phase 2b: the reliable channel ("zb-rel")
+  ZbRtcRelUp: function (id) { return window.zbrtc && window.zbrtc.relUp ? window.zbrtc.relUp(id) : 0; },
+  ZbRtcSendRel: function (id, ptr, len) { return window.zbrtc && window.zbrtc.sendRel ? window.zbrtc.sendRel(id, HEAPU8.slice(ptr, ptr + len)) : 0; },
+  ZbRtcLastChannel: function () { return window.zbrtc ? (window.zbrtc.lastCh | 0) : 0; },
   // Resume token of this tab ("CODE.ID.TOKEN") in sessionStorage: a reloaded tab can free the slot its previous incarnation left in limbo.
   ZbResumeStore: function (ptr) {
     try { var v = UTF8ToString(ptr); if (v) sessionStorage.setItem('zb.resume', v); else sessionStorage.removeItem('zb.resume'); } catch (e) {}

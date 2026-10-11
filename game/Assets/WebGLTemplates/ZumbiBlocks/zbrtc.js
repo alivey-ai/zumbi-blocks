@@ -1,13 +1,14 @@
 // Zumbi Blocks WebRTC fast lane (Phase 2, see docs/design/PHASE2-WEBRTC.md and docs/MULTIPLAYER.md "Data channel lane").
 //
-// One unordered, maxRetransmits-0 RTCDataChannel ("zb-fast", negotiated id 1) between the host and each client carries
-// ONLY host->client state frames and echo probes (same bytes the relay would send). Everything else (RPC, INST, DESTROY...)
-// stays on the WebSocket relay. Signaling is JSON text frames on that same WebSocket. The WebSocket path stays the reference
-// and the fallback: if the channel is not healthy, state simply keeps flowing over the relay.
+// One unordered, maxRetransmits-0 RTCDataChannel ("zb-fast", negotiated id 1) between the host and each client carries state frames
+// (host->client, and since phase 2b client->host) and echo probes (same bytes the relay would send). Phase 2b adds a second, reliable and
+// ordered channel ("zb-rel", negotiated id 2) for RPC / INST / DESTROY in both directions (framing, sequence numbers, acks, fences and the
+// fallback all live in ZbNet, C#: this file only moves bytes). Signaling is JSON text frames on the WebSocket. The WebSocket path stays the
+// reference and the fallback: if a channel is not healthy, traffic simply goes over the relay again.
 //
 // Cost rule: STUN only (free public servers), no TURN. Peers that cannot connect directly stay on the WebSocket relay.
 //
-// Page switches: ?p2p=0 kill switch, ?p2p=drop (test: this client page kills its channel 12 s after it opened, once),
+// Page switches: ?p2p=0 kill switch (both channels), ?rel=0 (no reliable channel: phase 2 behaviour), ?p2p=drop (test: this client page kills its channel 12 s after it opened, once),
 // ?p2p=block (test: ICE can never connect), ?life=MS (maxPacketLifeTime instead of maxRetransmits 0),
 // ?netsim=RTT,JITTER,LOSS (LOSS % is applied to data frames received over the channel), ?netsimp2p=RTT,JITTER,LOSS (channel only).
 //
@@ -18,6 +19,8 @@
   function qp(k) { var m = new RegExp('[?&]' + k + '=([^&]*)').exec(Q); return m ? decodeURIComponent(m[1]) : null; }
   var MODE = qp('p2p');
   var ENABLED = MODE !== '0' && typeof RTCPeerConnection === 'function';
+  var REL = ENABLED && qp('rel') !== '0';
+  var REL_BUF_HI = 4 * 1024 * 1024; // a reliable channel that cannot drain this is treated as down (ZbNet falls back to the relay)
   var ICE = [{ urls: ['stun:stun.cloudflare.com:3478'] }, { urls: ['stun:stun.l.google.com:19302'] }];
 
   var PROBE_MS = 500;       // probe every direction
@@ -46,7 +49,7 @@
 
   var Z = {
     enabled: ENABLED, mode: MODE, s: null, myId: -1, isHost: false,
-    peers: {}, rx: [], lastPeer: -1, lastArrival: 0,
+    peers: {}, rx: [], lastPeer: -1, lastArrival: 0, lastCh: 0, rel: REL,
     genCounter: 0, attempts: 0, helloAt: 0, dropped: false, retryTimer: 0, gaveUp: false, everUp: false
   };
 
@@ -106,6 +109,7 @@
       id: id, gen: gen, pc: null, dc: null, up: false, everUp: false, opened: false,
       t0: now(), lastRx: 0, good: 0, seq: 0, pend: {}, rtt: 0, rttAvg: 0, rttMin: 1e9, got: 0, lost: 0,
       rxFrames: 0, rxBytes: 0, txFrames: 0, txBytes: 0, skipped: 0, flips: 0, overSince: 0, lastSendAt: 0, lastRxAt: 0,
+      rel: null, relRxFrames: 0, relRxBytes: 0, relTxFrames: 0, relTxBytes: 0, relLastSendAt: 0, relLastRxAt: 0,
       probeTimer: 0, connTimer: 0, watchTimer: 0, remoteSet: false, ice: [], cand: '', torn: false, downSince: 0
     };
   }
@@ -121,6 +125,14 @@
     var dc = pc.createDataChannel('zb-fast', opts);
     dc.binaryType = 'arraybuffer';
     P.dc = dc;
+    if (REL) {
+      var rel = pc.createDataChannel('zb-rel', { negotiated: true, id: 2, ordered: true });
+      rel.binaryType = 'arraybuffer';
+      P.rel = rel;
+      rel.onclose = function () { if (!P.torn && P.opened) fail(P, 'rel-closed'); };
+      rel.onerror = function () {};
+      rel.onmessage = function (e) { if (!P.torn) onRel(P, e); };
+    }
     pc.onicecandidate = function (e) {
       if (P.torn || !e.candidate) return;
       sendSig(P.id, P.gen, 'ice', { c: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate });
@@ -257,6 +269,7 @@
     P.torn = true;
     clearTimeout(P.connTimer); clearInterval(P.probeTimer); clearInterval(P.watchTimer);
     try { if (P.dc) { P.dc.onmessage = P.dc.onclose = P.dc.onopen = null; P.dc.close(); } } catch (e) {}
+    try { if (P.rel) { P.rel.onmessage = P.rel.onclose = null; P.rel.close(); } } catch (e) {}
     try { if (P.pc) { P.pc.onicecandidate = P.pc.onconnectionstatechange = null; P.pc.close(); } } catch (e) {}
     if (!silent) sendSig(Z.isHost ? P.id : 0, P.gen, 'bye');
   }
@@ -327,8 +340,19 @@
     var at = t;
     if (simOn) { at = Math.max(P.lastRxAt, t + simDelay()); P.lastRxAt = at; }
     P.rxFrames++; P.rxBytes += e.data.byteLength;
-    if (Z.rx.length >= RXQ_MAX) Z.rx.shift();
-    Z.rx.push({ t: at, d: new Uint8Array(e.data), peer: P.id });
+    if (Z.rx.length >= RXQ_MAX) return; // drop the newest state frame (never a queued reliable one)
+    Z.rx.push({ t: at, d: new Uint8Array(e.data), peer: P.id, ch: 0 });
+  }
+
+  // reliable channel: everything that arrives goes to the same receive queue, marked ch 1 (ZbNet parses it)
+  function onRel(P, e) {
+    if (Z.stalled) return;
+    if (!(e.data instanceof ArrayBuffer) || e.data.byteLength < 4) return;
+    var t = now(), at = t;
+    if (simOn) { at = Math.max(P.relLastRxAt, t + simDelay()); P.relLastRxAt = at; }
+    P.relRxFrames++; P.relRxBytes += e.data.byteLength;
+    // never drop reliable data: the receive queue may grow past RXQ_MAX for it
+    Z.rx.push({ t: at, d: new Uint8Array(e.data), peer: P.id, ch: 1 });
   }
 
   // test hook: window.zbrtc.stall(true) makes this page's channel silently swallow everything (both directions), like a dead network path
@@ -337,6 +361,19 @@
   Z.closePeer = function (id) { var P = Z.peers[id]; if (P) { teardown(P, true); delete Z.peers[id]; } };
 
   // --- API used by the jslib shims ------------------------------------------------------------
+  // reliable channel usable: the lane is healthy (probes) and the reliable channel is open and draining
+  Z.relUp = function (id) { var P = Z.peers[id]; return P && !P.torn && P.up && P.rel && P.rel.readyState === 'open' && P.rel.bufferedAmount < REL_BUF_HI ? 1 : 0; };
+  Z.sendRel = function (id, u8) {
+    var P = Z.peers[id];
+    if (!P || P.torn || !P.rel || P.rel.readyState !== 'open') return 0;
+    if (Z.stalled) return 1; // test: a dead path swallows it (the sender's ack bookkeeping notices)
+    var buf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength), rel = P.rel;
+    var doSend = function () { try { if (!P.torn && rel.readyState === 'open') rel.send(buf); } catch (e) {} };
+    if (!simOn) doSend();
+    else { var t = now(), at = Math.max(P.relLastSendAt, t + simDelay()); P.relLastSendAt = at; setTimeout(doSend, Math.max(0, at - t)); }
+    P.relTxFrames++; P.relTxBytes += buf.byteLength;
+    return 1;
+  };
   Z.peerUp = function (id) { var P = Z.peers[id]; return P && !P.torn && P.up ? 1 : 0; };
   Z.anyUp = function () { for (var id in Z.peers) { var P = Z.peers[id]; if (!P.torn && P.up) return 1; } return 0; };
   Z.send = function (id, u8) {
@@ -360,7 +397,7 @@
     var head = q[0];
     if (head.t > now()) return 0;
     q.shift();
-    Z.lastArrival = head.t; Z.lastPeer = head.peer;
+    Z.lastArrival = head.t; Z.lastPeer = head.peer; Z.lastCh = head.ch | 0;
     if (head.d.length > cap) return -1;
     heap.set(head.d, ptr);
     return head.d.length;
@@ -376,6 +413,7 @@
       case 3: { var n = P.got + P.lost; return n > 0 ? 100 * P.lost / n : 0; }
       case 4: return P.rxFrames; case 5: return P.rxBytes; case 6: return P.txFrames; case 7: return P.txBytes;
       case 8: return P.dc ? P.dc.bufferedAmount : 0; case 9: return P.skipped; case 10: return P.flips; case 11: return Z.attempts;
+      case 12: return P.rel ? P.rel.bufferedAmount : 0; case 13: return P.relTxFrames; case 14: return P.relTxBytes; case 15: return P.relRxFrames; case 16: return P.relRxBytes;
     }
     return 0;
   };
@@ -385,7 +423,8 @@
     for (var id in Z.peers) {
       var P = Z.peers[id];
       o.peers[id] = { state: P.torn ? 'closed' : P.up ? 'up' : P.opened ? 'open' : 'connecting', up: P.up, rtt: Math.round(P.rtt), rttAvg: Math.round(P.rttAvg), lossPct: Z.stat(id, 3),
-        rxFrames: P.rxFrames, rxBytes: P.rxBytes, txFrames: P.txFrames, txBytes: P.txBytes, buffered: Z.stat(id, 8), skipped: P.skipped, flips: P.flips, cand: P.cand };
+        rxFrames: P.rxFrames, rxBytes: P.rxBytes, txFrames: P.txFrames, txBytes: P.txBytes, buffered: Z.stat(id, 8), skipped: P.skipped, flips: P.flips, cand: P.cand,
+        rel: P.rel ? P.rel.readyState : 'none', relUp: Z.relUp(id), relTxFrames: P.relTxFrames, relRxFrames: P.relRxFrames, relBuffered: Z.stat(id, 12) };
     }
     return o;
   };

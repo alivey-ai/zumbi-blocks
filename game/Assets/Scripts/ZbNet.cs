@@ -147,6 +147,9 @@ public static partial class ZbNet
     public static int myPing;
 
     static bool synced;
+    public static readonly Dictionary<int, long> instSent = new Dictionary<int, long>(), instRecv = new Dictionary<int, long>(); // by group, any path (tests)
+    // the lane that carries `sender`'s state to this peer right now: host -> that client's channel; client -> its channel to the host (2b: everybody's)
+    static bool LaneUp(int sender) { return ZbCfg.p2p && (Network.isServer ? ZbRtc.PeerUp(sender) : ZbRtc.PeerUp(0) && (sender == 0 || ZbCfg.rel)); }
     static string hostName, hostPassword, hostType = "";
     static bool hostListed; static string hostComment = "";
     static long counter;
@@ -265,7 +268,7 @@ public static partial class ZbNet
         ZbMenu.OnCountdown(0);
         mode = Mode.Offline; synced = false; remoteCount = 0; roomCode = ""; counter = 0; localId = 0;
         outLen = 0; playerIp.Clear(); playerPing.Clear(); pendingRpcs.Clear(); myPing = 0; ZbSync.Reset(); nextEcho = 0;
-        fastLen = 0; fastAny = fastAll = false; parked.Clear(); laneUp.Clear(); ctxViaDc = false;
+        fastLen = 0; fastAny = fastAll = false; parked.Clear(); laneUp.Clear(); ctxViaDc = false; ResetDirect();
         ResetResume(); ZbTeam.Reset();
     }
 
@@ -362,6 +365,7 @@ public static partial class ZbNet
         long view = NewView();
         var clone = InstantiateNet(prefab, pos, rot, view, localId);
         if (idx < 0) { Debug.LogError("[zbnet] prefab not in table, not replicated: " + (prefab != null ? prefab.name : "null")); return clone; }
+        { long ic; instSent.TryGetValue(group, out ic); instSent[group] = ic + 1; }
         w.Begin(C_INST).U8(group).I64(view).U16(idx).Vec3(pos).Quat(rot);
         Queue();
         return clone;
@@ -516,6 +520,12 @@ public static partial class ZbNet
 
     static void Queue()
     {
+        if (RouteOwn()) return; // phase 2b: over the data channel to direct peers, the host as their gateway (ZbNetDirect.cs)
+        QueueWs();
+    }
+
+    static void QueueWs()
+    {
         NoteBuffered(); // buffered ops are counted and remembered for the resend after a reconnect
         if (reconnecting) return; // the socket is gone: unbuffered messages are simply lost, buffered ones wait in the ring
         QueueOut();
@@ -586,7 +596,8 @@ public static partial class ZbNet
                 dcOut[n++] = (byte)ms; dcOut[n++] = (byte)(ms >> 8); dcOut[n++] = (byte)(ms >> 16); dcOut[n++] = (byte)(ms >> 24);
                 if (n + (o - start) > dcOut.Length) { o = start; break; }
                 Buffer.BlockCopy(fastBuf, start, dcOut, n, o - start); n += o - start;
-                foreach (var id in playerIp.Keys)
+                if (mode == Mode.Client) { if (ZbRtc.PeerUp(0) && ZbRtc.Send(0, dcOut, n)) { ZbSync.dcTxFrames++; ZbSync.dcTxBytes += n; } } // phase 2b: own state to the host
+                else foreach (var id in playerIp.Keys)
                     if (id != 0 && ZbRtc.PeerUp(id) && ZbRtc.Send(id, dcOut, n)) { ZbSync.dcTxFrames++; ZbSync.dcTxBytes += n; }
             }
         }
@@ -612,7 +623,12 @@ public static partial class ZbNet
             }
             fastAny = up > 0; fastAll = total > 0 && up == total;
         }
-        else if (mode == Mode.Client) NoteLane(0, ZbRtc.PeerUp(0));
+        else if (mode == Mode.Client)
+        {
+            bool u = ZbRtc.PeerUp(0);
+            NoteLane(0, u);
+            fastAny = fastAll = u && ZbCfg.rel; // phase 2b: the client's own state goes to the host over the channel, the host passes it on
+        }
     }
     static void NoteLane(int id, bool up)
     {
@@ -621,6 +637,7 @@ public static partial class ZbNet
         laneUp[id] = up;
         ZbSync.laneFlips++;
         ZbSync.Clock(id).Reset();
+        if (mode == Mode.Client) foreach (var c in ZbSync.clocks.Values) c.Reset(); // phase 2b: other players' state comes through the host's channel too
         ZbSync.rtt.Remove(id);
     }
 
@@ -697,6 +714,7 @@ public static partial class ZbNet
         RetryPending();
         RetryParked();
         UpdateLanes();
+        UpdateDirect();
     }
 
     // Reads the frames that arrived on the WebSocket. Returns false when the caller should stop for this frame (after WELCOME / session end).
@@ -724,6 +742,7 @@ public static partial class ZbNet
             if (n == 0) break;
             if (n < 0) continue;
             ZbSync.dcRxFrames++; ZbSync.dcRxBytes += n;
+            if (ZbRtc.LastChannel() == 1) { ProcessRel(ZbRtc.LastPeer(), n); continue; } // phase 2b: reliable channel
             ZbSync.ctxArrival = ZbRtc.LastArrival();
             ctxViaDc = true; dcPeer = ZbRtc.LastPeer();
             try { ProcessFrame(n); } finally { ctxViaDc = false; }
@@ -738,6 +757,9 @@ public static partial class ZbNet
     {
         if (mode == Mode.Offline) return;
         float hz = mode == Mode.Host || mode == Mode.HostConnecting ? ZbCfg.flushHost : ZbCfg.flushClient;
+        // phase 2b: every peer direct -> the WebSocket carries only buffer bookkeeping / room info (host) or pings (client)
+        if (hz > 0f && AllDirect()) hz = Mathf.Min(hz, mode == Mode.Host ? 2f : 1f);
+        FlushRel();
         float now = Time.unscaledTime;
         if (hz <= 0f || now >= nextFlush || outLen > OUT_SOFT)
         {
@@ -777,18 +799,22 @@ public static partial class ZbNet
                 ZbSync.rxMsgs++;
                 byte op = rx[o]; long c; ZbSync.rxByOp.TryGetValue(op, out c); ZbSync.rxByOp[op] = c + 1;
             }
-            if (!ProcessMessage(o, len)) yield = true;
+            if (!ProcessMessage(rx, o, len)) yield = true;
             o += len;
         }
         ZbSync.ctxSender = -1; ZbSync.ctxHasStamp = false;
         return !yield && mode != Mode.Offline;
     }
 
-    static bool ProcessMessage(int o, int len)
+    static bool ProcessMessage(byte[] buf, int o, int len)
     {
-        var r = new ZbR(rx, o, len);
+        var r = new ZbR(buf, o, len);
         int op = r.U8();
         if (ctxViaDc && op != S_TIME && op != S_STATE && op != S_ECHO) return true;
+        // phase 2b (ZbNetDirect.cs): fences and resends of data channel messages
+        if (op == S_TAG) { tagSeq = (uint)r.I32(); tagFrom = r.I32(); tagPending = r.Ok; return true; }
+        if (op == S_FENCE) { int from = r.I32(); uint fid = (uint)r.I32(); if (r.Ok && DirectOn) Ctl(LinkOf(from), D_FENCE_ACK, fid); return true; }
+        if (!ctxViaDc && TaggedHandled(buf, o, len)) return true;
         switch (op)
         {
             case S_WELCOME:
@@ -804,13 +830,15 @@ public static partial class ZbNet
             }
             case S_RPC:
             {
-                int sender = r.I32(); r.U8(); long view = r.I64(); string name = r.Str8(); var args = ReadArgs(r);
+                int sender = r.I32(); int md = r.U8(); long view = r.I64(); string name = r.Str8(); var args = ReadArgs(r);
+                if (Network.isServer) NoteRelayKill(view, name, md);
                 if (!DeliverRpc(view, name, args)) pendingRpcs.Add(new PendingRpc { t = Time.unscaledTime, sender = sender, view = view, name = name, args = args });
                 break;
             }
             case S_INST:
             {
-                int sender = r.I32(); r.U8(); long view = r.I64(); int idx = r.U16(); var pos = r.Vec3(); var rot = r.Quat();
+                int sender = r.I32(); int grp = r.U8(); long view = r.I64(); int idx = r.U16(); var pos = r.Vec3(); var rot = r.Quat();
+                { long ic; instRecv.TryGetValue(grp, out ic); instRecv[grp] = ic + 1; }
                 LoadTable();
                 if (table == null || idx >= table.prefabs.Length || table.prefabs[idx] == null) { Debug.LogError("[zbnet] unknown prefab index " + idx); break; }
                 { GameObject have; if (roots.TryGetValue(view, out have) && have != null) break; } // already there (a resume can repeat an instantiate)
@@ -833,7 +861,7 @@ public static partial class ZbNet
             case S_DISCONNECTED:
             {
                 int id = r.I32();
-                remoteCount = Math.Max(0, remoteCount - 1); playerPing.Remove(id);
+                remoteCount = Math.Max(0, remoteCount - 1); playerPing.Remove(id); DropLink(id);
                 ZbRtc.ClosePeer(id); laneUp.Remove(id);
                 Notify("OnPlayerDisconnected", new NetworkPlayer { id = id });
                 playerIp.Remove(id);
@@ -875,10 +903,12 @@ public static partial class ZbNet
             case S_TIME:
             {
                 int sender = r.I32(); double stamp = (uint)r.I32();
-                if (ctxViaDc) sender = dcPeer;
+                // over the channel the sender is the channel's peer, whatever the frame claims; a client trusts the host's claim (phase 2b: the host
+                // passes on other players' state with their own clock reading)
+                if (ctxViaDc) sender = dcPeer == 0 && !Network.isServer && DirectOn && sender > 0 ? sender : dcPeer;
                 ZbSync.ctxSender = sender; ZbSync.ctxStamp = stamp; ZbSync.ctxHasStamp = true;
                 // one clock per sender samples only the lane that carries its state right now
-                if (ZbSync.ctxArrival > 0 && ctxViaDc == (ZbCfg.p2p && ZbRtc.PeerUp(sender))) ZbSync.Clock(sender).Sample(ZbSync.ctxArrival, stamp);
+                if (ZbSync.ctxArrival > 0 && ctxViaDc == LaneUp(sender)) ZbSync.Clock(sender).Sample(ZbSync.ctxArrival, stamp);
                 break;
             }
             case S_ECHO:
@@ -900,7 +930,13 @@ public static partial class ZbNet
                 if (ctxViaDc)
                 {
                     // only the host sends state over the channel, and a state message can overtake the WebSocket INST of a fresh object
-                    if (dcPeer == 0 && !Network.isServer && ReadState(r, out view, out name, out args)) DeliverFastState(view, name, args);
+                    if (dcPeer == 0 && !Network.isServer) { if (ReadState(r, out view, out name, out args)) DeliverFastState(view, name, args); }
+                    else if (Network.isServer && dcPeer != 0 && DirectOn && ZbSync.ctxSender == dcPeer && ReadState(r, out view, out name, out args))
+                    {
+                        // phase 2b: a direct client's own state: use it here and pass it on (ZbNetDirect.cs)
+                        DeliverFastState(view, name, args);
+                        GatewayState(dcPeer, (uint)ZbSync.ctxStamp, buf, o, len);
+                    }
                     break;
                 }
                 if (ReadState(r, out view, out name, out args) && !DeliverRpc(view, name, args))
@@ -1412,7 +1448,7 @@ public class NetRunner : MonoBehaviour
         sb.Append(",\"overlay\":").Append(showStats ? 1 : 0).Append(",\"netsimMs\":").Append(ZbWs.NetsimMs());
         sb.Append(",\"p2p\":{\"on\":").Append(ZbCfg.p2p ? 1 : 0).Append(",\"mode\":\"").Append(ZbCfg.p2pMode).Append("\",\"rxFrames\":").Append(ZbSync.dcRxFrames).Append(",\"rxBytes\":").Append(ZbSync.dcRxBytes)
           .Append(",\"rxMsgs\":").Append(ZbSync.dcRxMsgs).Append(",\"txFrames\":").Append(ZbSync.dcTxFrames).Append(",\"txBytes\":").Append(ZbSync.dcTxBytes).Append(",\"txMsgs\":").Append(ZbSync.dcTxMsgs)
-          .Append(",\"flips\":").Append(ZbSync.laneFlips).Append(",\"links\":{");
+          .Append(",\"flips\":").Append(ZbSync.laneFlips).Append(",\"direct\":").Append(ZbNet.DirectJson()).Append(",\"inst\":{\"sent\":").Append(DictJson(ZbNet.instSent)).Append(",\"recv\":").Append(DictJson(ZbNet.instRecv)).Append("},\"links\":{");
         { bool f2 = true; foreach (var id in ZbNet.LinkIds()) { sb.Append(f2 ? "" : ",").Append("\"").Append(id).Append("\":{\"up\":").Append(ZbRtc.PeerUp(id) ? 1 : 0).Append(",\"state\":").Append(ZbRtc.Stat(id, 0)).Append(",\"rtt\":").Append(Math.Round(ZbRtc.Stat(id, 1), 1)).Append(",\"loss\":").Append(Math.Round(ZbRtc.Stat(id, 3), 1)).Append(",\"buffered\":").Append(ZbRtc.Stat(id, 8)).Append(",\"skipped\":").Append(ZbRtc.Stat(id, 9)).Append("}"); f2 = false; } }
         sb.Append("}}");
         sb.Append(",\"cfg\":\"").Append(ZbCfg.interp ? "interp " : "nointerp ").Append(ZbCfg.compact ? "compact " : "rpc ").Append("rate=").Append(ZbCfg.rate).Append("\"");
@@ -1462,6 +1498,7 @@ public class NetRunner : MonoBehaviour
     }
 
     // which link each peer uses: DC (WebRTC data channel, direct) or WS (Cloudflare relay), and its round trip
+    static string DictJson(Dictionary<int, long> d) { var s = new StringBuilder("{"); bool f = true; foreach (var kv in d) { s.Append(f ? "" : ",").Append("\"").Append(kv.Key).Append("\":").Append(kv.Value); f = false; } return s.Append("}").ToString(); }
     static void AppendLinks(StringBuilder sb)
     {
         if (!ZbCfg.p2p) { sb.Append("Link: WS (p2p off)\n"); return; }
@@ -1470,7 +1507,7 @@ public class NetRunner : MonoBehaviour
             bool up = ZbRtc.PeerUp(id);
             int st = (int)ZbRtc.Stat(id, 0);
             sb.Append("Link ").Append(Network.isServer ? "player " + id : "host").Append(": ").Append(up ? "DC" : "WS");
-            if (up) sb.Append("  rtt ").Append(Math.Round(ZbRtc.Stat(id, 2))).Append(" ms, probe loss ").Append(ZbRtc.Stat(id, 3).ToString("0")).Append("%, buf ").Append(ZbRtc.Stat(id, 8));
+            if (up) sb.Append(ZbNet.DirectTo(id) ? "+rel" : "").Append("  rtt ").Append(Math.Round(ZbRtc.Stat(id, 2))).Append(" ms, probe loss ").Append(ZbRtc.Stat(id, 3).ToString("0")).Append("%, buf ").Append(ZbRtc.Stat(id, 8));
             else sb.Append(st == 1 ? "  (connecting)" : st == 2 ? "  (channel open, checking)" : st == 4 ? "  (direct failed, relay only)" : "  (no direct link)");
             sb.Append("\n");
         }

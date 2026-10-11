@@ -13,6 +13,12 @@ public static class ZbRtc
     [DllImport("__Internal")] static extern double ZbRtcLastArrival();
     [DllImport("__Internal")] static extern void ZbRtcClosePeer(int id);
     [DllImport("__Internal")] static extern double ZbRtcStat(int id, int which);
+    [DllImport("__Internal")] static extern int ZbRtcRelUp(int id);
+    [DllImport("__Internal")] static extern int ZbRtcSendRel(int id, byte[] data, int len);
+    [DllImport("__Internal")] static extern int ZbRtcLastChannel();
+    public static bool RelUp(int id) { return ZbRtcRelUp(id) == 1; }
+    public static bool SendRel(int id, byte[] d, int len) { return ZbRtcSendRel(id, d, len) == 1; }
+    public static int LastChannel() { return ZbRtcLastChannel(); }
     public static bool PeerUp(int id) { return ZbRtcPeerUp(id) == 1; }
     public static bool AnyUp() { return ZbRtcAnyUp() == 1; }
     public static bool Send(int id, byte[] d, int len) { return ZbRtcSend(id, d, len) == 1; }
@@ -32,5 +38,8 @@ public static class ZbRtc
     public static double LastArrival() { return 0; }
     public static void ClosePeer(int id) { }
     public static double Stat(int id, int which) { return 0; }
+    public static bool RelUp(int id) { return false; }
+    public static bool SendRel(int id, byte[] d, int len) { return false; }
+    public static int LastChannel() { return 0; }
 #endif
 }

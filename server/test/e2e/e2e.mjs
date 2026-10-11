@@ -57,11 +57,14 @@ check("zombie counts match", da.zombies === db.zombies && db.zombies === dc.zomb
 check("wave number synced", da.wave === 1, J(da.wave));
 
 // --- shooting sync ---
-const sentBefore = B.stats.instSent[1] || 0; const recvBefore = A.stats.instRecv[1] || 0;
+// bullets: counted by the game on every path (phase 2b: a direct client's instantiates go over the data channel, not its WebSocket)
+const gInst = async (p) => { const s = await p.statsDump(); return s && s.p2p && s.p2p.inst ? s.p2p.inst : { sent: {}, recv: {} }; };
+const sentBefore = (await gInst(B)).sent[1] || 0; const recvBefore = (await gInst(A)).recv[1] || 0;
 await B.click_(640, 360);
-await B.mouse.down(); await B.waitForTimeout(1500); await B.mouse.up(); await B.waitForTimeout(500);
-check("B's shots are sent as bullet instantiates (group 1)", (B.stats.instSent[1] || 0) > sentBefore, J(B.stats.instSent));
-check("host receives B's bullets", (A.stats.instRecv[1] || 0) > recvBefore, J(A.stats.instRecv));
+await B.mouse.down(); await B.waitForTimeout(1500); await B.mouse.up(); await B.waitForTimeout(800);
+const gB = await gInst(B), gA = await gInst(A);
+check("B's shots are sent as bullet instantiates (group 1)", (gB.sent[1] || 0) > sentBefore, J([gB, B.stats.instSent]));
+check("host receives B's bullets", (gA.recv[1] || 0) > recvBefore, J([gA, A.stats.instRecv]));
 
 
 {

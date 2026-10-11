@@ -19,9 +19,10 @@ Make online play feel smooth without changing the network architecture.
 - [x] The Durable Object also does signaling (JSON text frames on the existing socket); health checks with hysteresis, automatic fallback to the WebSocket path, `?p2p=0` kill switch, F3 overlay shows DC/WS and RTT per peer.
 - [x] Cost: STUN only (free public servers), no TURN, nothing that needs the Workers Paid plan. Peers that cannot connect directly stay on the relay.
 - [x] Privacy note (the host sees client IPs and vice versa) on the page and in the README.
-- [ ] Client to host state over the channel (2b): the only way to take the clients' own upstream (about 25 frames/s each) off the Durable Object; today host to Durable Object traffic dropped by about half, total by 30 to 40 % with one client.
-- [ ] Real-network verification (home + phone hotspot, different regions) and a week of `p2p-stat` log lines to learn the real direct-connect rate; only then decide on 2b.
-- Not planned: TURN (costs money), reliable channel for RPCs.
+- [x] **2b** (2026-10-11, after the free plan quota incident): direct clients send state and RPC / INST / DESTROY to the host over the data channels (a second, reliable channel), the host is their gateway; the relay keeps the buffer and serves peers without a channel. With every client direct a room sends ~2 WebSocket frames/s to the Durable Object instead of 25 (docs/MULTIPLAYER.md "Free plan budget").
+- [x] Free plan budget: fixed-rate WebSocket batching (host 15 Hz, clients 10 Hz), keepalive auto-response, fewer pings / lobby calls, edge-cached room list, "online is full for today" screen, `server/scripts/do-usage.mjs`.
+- [ ] Real-network verification (home + phone hotspot, different regions) and a week of `p2p-stat` log lines to learn the real direct-connect rate (decides how far the free plan stretches: strict-NAT players cost 10 frames/s each).
+- Not planned: TURN (costs money).
 
 ## Phase 3 — Getting into a game (done, see docs/MULTIPLAYER.md "Getting into a game")
 - [x] Nickname: the original's Name field is used everywhere; asked once (before create / join / Quick Play / invite) while it is still the default.
@@ -70,6 +71,6 @@ Make online play feel smooth without changing the network architecture.
 - ~~**Missing effects:** rifle muzzle flash, flare (Rflare_out), RPG smoke (shotRPG).~~ DONE (nothing to convert): the original never used legacy particle emitters. All 29 particle components in v0.7 are Shuriken `ParticleSystem`s with their original data, and they render in the Unity 6 build. Verified in the editor and in the real WebGL build, screenshots `docs/img/effects-*.png`, test `server/test/e2e/effects.mjs` (see RECOVERY.md).
 - ~~**Multiplayer airdrop bag on clients:** e2e saw 0 bags on the client side.~~ DONE: test artifact, clients do see (and can open) the bag. The test's bag counter went through `sc_matchcontroller`, which only the host has. Now counted by name; `supply.mjs` asserts the client sees exactly 1 bag and can open it (RECOVERY.md).
 - **Live e2e shooting checks** (2026-10-09, after the save/mannequin deploy): e2e.mjs against the live URL, 3 runs: 42/42, 41/42, 42/42. The one failure was "shooter sees own bullets immediately" (sample [0,186]: a point-in-time count of the shooter's bullets that read 0 once while 186 shots were counted overall). Local runs pass; B's received bullets passed in all 3 live runs. Judged a timing flake of the point sample (live RTT is higher, short bullet life), roughly 1 in 3 runs for that one check; no consistent live failure, nothing changed.
-- **Phase 2b:** client to host state over the data channel (the real Durable Object cost cut); check relay `p2p-stat` logs for the real-world direct-connect rate.
+- ~~**Phase 2b**~~ DONE (2026-10-11). Still to do: check relay `p2p-stat` logs for the real-world direct-connect rate.
 - ~~**Live e2e must not touch real players.**~~ DONE: every test page carries the cookie `zbtest=1`; rooms made by such a page are hidden test rooms (never in the server list or Quick Play of real players, and test pages only ever see test rooms). Test rooms are unlisted by default (`createRoom`), only the server list tests list them.
 - **Hidden host tab:** measure real behaviour once manually (Playwright cannot background a page).

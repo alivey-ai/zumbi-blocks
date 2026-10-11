@@ -73,7 +73,7 @@ The relay compacts the buffer so it does not grow forever (the original relied o
 
 ## Wire protocol (version 3; version 2 sockets are still accepted and behave exactly as before phase 4)
 
-One binary WebSocket per player. All integers little endian. A WebSocket message is a *frame*: a sequence of messages, each `u16 length` + body (`body[0]` is the opcode). The client sends everything produced in one game frame as one WebSocket message (split below 60 KB); the relay answers per recipient the same way.
+One binary WebSocket per player. All integers little endian. A WebSocket message is a *frame*: a sequence of messages, each `u16 length` + body (`body[0]` is the opcode). The client flushes what it produced at a fixed rate (host 15 Hz, clients 10 Hz, see "Free plan budget"; split below 60 KB / 1500 messages, the relay reads up to 2048), every game frame's messages led by their own `TIME`; the relay answers per recipient with one frame, putting `S_TIME` in front of the first message a recipient gets after each clock reading. The text frame `zbka` is the keepalive (answered `zbka` by the runtime, never reaches the relay code).
 
 Connect URLs (query values URL-encoded, `v` must be 2 or 3 or the relay rejects with reason 7; phase 4 additions: `rejoin=ID.TOKEN&seq=N` (resume), `stale=ID.TOKEN` (free the slot a crashed tab left in limbo), `claim=CODE.ID.TOKEN` on `/ws/host` (claim restart); version 2 added the messages marked below, a page from the version 1 era is refused instead of misbehaving):
 
@@ -97,6 +97,10 @@ Client to relay:
 | 11 | STATE (v2) | compact position update, see "State messages" |
 | 16 | META (phase 3, host only) | `u16 wave, u8 flags (1 started, 2 ended), u8 alive, [u8 countdown]`: feeds the server list and the Quick Play auto start. 5 or 6 bytes, anything else is ignored. Ops 12-15 are reserved (phase 1/2). |
 | 17 | VIS (phase 4, protocol 3) | `u8 visible, u8 fps, u16 rtt`: written by the page itself (jslib) on `visibilitychange`, as a complete frame, because the game does not run in a hidden tab. 18 `C_SNAP` and 19 `C_ADOPTED` stay reserved for host migration level C (not built). |
+| 21 | SKIP (2b, host only) | `u8 n, n x i32`: the clients that get the host's messages over their reliable data channel; the relay stops forwarding the host's RPC / INST / DESTROY to them (in order with the host's other messages; kept in the host socket's attachment). State keeps its own `dc` flag. |
+| 22 | FWD (2b, host only) | `i32 asSender, i32 only (-1 = normal routing), u8 flags (1 buffer bookkeeping, 2 clock, 4 tag), [u32 clock], [u32 tag]`, then one client message (RPC / INST / DESTROY / REMOVE_RPCS / DESTROY_PLAYER / STATE): the relay handles it as if `asSender` had sent it (ownership checks, sender id, `S_TIME` with that client's clock), never back to the host, skipping the SKIP clients (state: the `dc` clients). Without flag 1, or with `only`, nothing is buffered. Flag 4 puts `S_TAG` in front. |
+| 23 | FENCE (2b) | `i32 target, u32 id`: delivered as `S_FENCE` after everything this peer sent before (clients may only fence the host). |
+| 24 | UP (2b, clients) | `u32 tag`, then one client message: to the host only, as `S_TAG` + the message, never buffered (resend of what a dead data channel may have lost; the host passes it on). |
 | 20 | SCORE (phase 5, host only) | `u8 rules (1 Timed waves, 2 More loot), u16 wave, u8 n, n x (u16 kills, str8 name)`: every player's kills for the leaderboard; sent on each new wave, every 15 s and when the match ends (before the META that ends it). Kept in memory, recorded once per match, see docs/LEADERBOARD.md. |
 
 Relay to client:
@@ -109,7 +113,7 @@ Relay to client:
 | 0x84 | DESTROY | `i64 view` |
 | 0x85 | PLAYER_CONNECTED (host) | `i32 id, str8 anonymousIpId` |
 | 0x86 | PLAYER_DISCONNECTED (host) | `i32 id` |
-| 0x87 | REJECT | `u8 reason`: 1 room not found, 2 wrong password, 3 room full, 4 host left, 5 kicked, 6 rate limited (retry later), 7 protocol mismatch, 8 someone else already claimed the room, 9 host away / restarting (retry), 10 resume refused (token unknown / grace over / bad seq). The relay closes the socket after it. |
+| 0x87 | REJECT | `u8 reason`: 1 room not found, 2 wrong password, 3 room full, 4 host left, 5 kicked, 6 rate limited (retry later), 7 protocol mismatch, 8 someone else already claimed the room, 9 host away / restarting (retry), 10 resume refused (token unknown / grace over / bad seq), 11 the free plan's daily Durable Object quota is used up (sent by the Worker, see "Free plan budget"). The relay closes the socket after it. |
 | 0x88 | PONG | `u32 clientTimeMs` |
 | 0x89 | PING_INFO (host) | `i32 id, u16 rttMs` |
 | 0x8A | SYNC_DONE | end of the buffered replay for a new joiner |
@@ -119,6 +123,8 @@ Relay to client:
 | 0x8e | SEQ (phase 4) | `u32 seq`: newest buffered entry in this frame / replay; appended at the end of every frame that carries buffered entries to a protocol 3 peer. The client keeps the last one it processed (what a resume continues from). |
 | 0x8f | HOST_STATE (phase 4) | `u8 state (0 ok, 1 host connection lost, 2 host tab hidden, 3 host left: new match being set up), u8 secondsLeft`. 0x90-0x94 are reserved (host change / snapshot / roster of level C), unused. |
 | 0x95 | COUNTDOWN (phase 3) | `u8 seconds` left until the Quick Play room starts by itself (0 = cancelled / started). Sent to everybody except the host, once a second while the countdown runs. 0x8E-0x94 are reserved (phase 4). |
+| 0x97 | FENCE (2b) | `i32 sender, u32 id` (see C_FENCE). |
+| 0x98 | TAG (2b) | `u32 seq, i32 from`: the next message is the data channel message with this sequence number from `from`, sent again through the relay; the receiver drops it if it already had it. |
 | 0x96 | RESULT (phase 5) | `u8 board (0 solo, 1 team, 255 not ranked), u16 rankToday, u16 rankAllTime` (best-wave board): sent to everybody still connected once the relay recorded the match. |
 
 `str8` = `u8 length` + utf8. `args` = `u8 count`, then per argument `u8 tag` + value: 0 null, 1 `i32`, 2 `f32`, 3 `u8` bool, 4 string (`u16 length` + utf8), 5 Vector3 (3 x f32), 6 Quaternion (4 x f32), 7 int[] (`u16 count` + i32s). The relay never looks inside `args`.
@@ -155,7 +161,7 @@ Added automatically to every remote object that receives `setposstuff` / `setzum
 The host raises `sc_player.sendrate` / `sc_zumbi.sendrate` of every object it instantiates to 30 (`?rate=N`, `?legacy=1` leaves the original 10): the scripts' counter is per frame, so this gives about 20 updates per second at 60 fps and one per frame below 30 fps. Only the network update rate changes, nothing in the game rules.
 
 ### Batching
-Messages produced in one game frame were already sent as one WebSocket frame in version 1 (`ZbNet.Queue` / `FlushOut` in `LateUpdate`), and the relay already answered with one frame per recipient per incoming frame (`room.js` `webSocketMessage`: unpack, route, regroup). What version 2 adds: the relay prepends the sender's `TIME`, the frame stays in order, and `server/test/relay.test.mjs` now tests it (one frame per recipient, order, 400 messages in one frame, frame without clock). Waiting to merge frames of several senders would add latency and was not done.
+Since the free plan fix (2026-10-11) the page no longer sends one WebSocket frame per rendered frame but flushes at a fixed rate (host 15 Hz, clients 10 Hz, `?flush=HZ`, `?flush=0` = every frame); every game frame inside a batch keeps its own clock reading, so interpolation still sees per-frame sender times (the adaptive delay goes up a little, the batch interval enters the jitter). Before that: messages produced in one game frame were already sent as one WebSocket frame in version 1 (`ZbNet.Queue` / `FlushOut` in `LateUpdate`), and the relay already answered with one frame per recipient per incoming frame (`room.js` `webSocketMessage`: unpack, route, regroup). What version 2 adds: the relay prepends the sender's `TIME`, the frame stays in order, and `server/test/relay.test.mjs` now tests it (one frame per recipient, order, 400 messages in one frame, frame without clock). Waiting to merge frames of several senders would add latency and was not done.
 
 ### Round trip to the host
 `ECHO` goes through the relay to the host and straight back (client to host once per second, host to every client once per second); the answer is produced by the host's game loop, so it contains the host's frame delay, which is what the player's actions also see. The old `PING` only measures the relay (still used for `Network.GetAveragePing`).
@@ -222,7 +228,7 @@ host browser                                client browser
 * **Switches (page URL):** `?p2p=0` kill switch (no `rtc=1`, byte-identical to the pre phase 2 behaviour), `?p2p=drop` test hook (this client closes its own channel 12 s after it opened, once), `?p2p=block` test hook (ICE can never connect), `?life=MS` (`maxPacketLifeTime` instead of `maxRetransmits 0`), `?netsim=RTT,JITTER,LOSS` (the channel gets the same delay as the socket plus LOSS % of received data frames; `?netsimp2p=` sets the channel alone). `window.zbrtc.info()` shows the state of the lane (tests), `window.zbrtc.stall(true)` makes it swallow everything like a dead path (tests).
 * **Stats (F3 overlay and `StatsDump`):** one `Link` line per peer: `DC` or `WS`, the RTT (average of the game's echo probes, which now run over the channel when it is up), probe loss and send buffer; plus DC in/out KB/s and messages/s and the number of lane flips. `StatsDump` has a `p2p` object with the cumulative counters and the links.
 * **Privacy:** WebRTC exposes IP addresses to the other end: the host's browser sees every client's IP and each client sees the host's (the relay's anonymous per room id design no longer hides it from the host). Disclosed on the page and in the README; `?p2p=0` turns it off.
-* **Not done (by design, see the design doc):** TURN (costs money; strict NAT / corporate networks stay on the relay), reliable channel for RPCs, client to host state over the channel (2b), ICE restart.
+* **Not done (by design, see the design doc):** TURN (costs money; strict NAT / corporate networks stay on the relay), ICE restart. (Reliable channel for RPCs and client to host traffic: done in 2b below.)
 
 ### Measured (local relay, headless Chrome with GPU, host + 1 client walking and shooting, both kept alive, 27 s window)
 `server/test/e2e/measure.mjs`, `?p2p=0` (before) against the default (after). The cost metric is the number of WebSocket frames the pages send, which is what the Durable Object receives (what the Free plan quota counts); frames the Durable Object sends are not billed.
@@ -242,6 +248,29 @@ What this does and does not show: it is one machine, so the "network" is loopbac
 * `server/test/relay.test.mjs` (15 tests): hello only for `rtc=1`, legacy clients never get a text frame, sig routing (star only, `from` stamped, bad kind / non JSON / oversize / unknown target / non-rtc target dropped, rate limit), `dc` flag (host state skips only flagged clients, RPCs and client state unaffected, the host can clear but not set, a closed socket drops the flag, non-rtc clients ignored). Not covered: a real hibernation cycle (the flag is stored with `serializeAttachment` like the player id).
 * `server/test/e2e/e2e.mjs` passes with the channel on (42 checks: channel up host to B and C, state counted on the channel, WebSocket state nearly zero, mixed room with a `?p2p=0` joiner, overlay link status), with `?p2p=0` (35, the old set) and with `NETSIM=60,20` (43). `single.mjs` and `supply.mjs` pass.
 * `server/test/e2e/fallback.mjs` (host + B + C `?p2p=drop` + D `?p2p=block`): D never gets a channel and plays on the relay (retries then stops); B's channel is stalled (a dead path with no close event): host state to B is starved for about 1.5 s (the watchdog; zombies hold, then flow again over the relay), no teleports, same zombies as the host afterwards, and after release the lane comes back after 3 good probes; C's channel is closed by the page (`?p2p=drop`, the peers are told): no measurable starvation, it reconnects within seconds. That 1.5 s hold on a silently dead path is the price of the design's watchdog value.
+
+### Phase 2b: everything over the channel, the host as gateway (2026-10-11)
+Built for the free plan (see "Free plan budget"): what the Durable Object is billed for is the WebSocket frames it receives, and after 2a most of them were the clients' own state and the host's RPCs. Code: `game/Assets/Scripts/ZbNetDirect.cs` (+ hooks in `ZbNet.cs`), `zbrtc.js`, relay ops 21-24 / 0x97-0x98 (see the protocol tables).
+
+```
+host browser  (gateway for its direct clients)                 client browser (direct)
+  +== "zb-fast" (unordered, maxRetransmits 0): state both ways, echo probes, other players' state passed on by the host ==+
+  +== "zb-rel"  (negotiated id 2, ordered, reliable): RPC / INST / DESTROY both ways, acks, fences ==========================+
+  | WS: buffered operations for the relay's buffer (2 Hz), room info, C_FWD for clients without a channel   | WS: ping every 10 s, keepalive
+  v                                                                                                          v
+                         Room DO: buffer (late joiners, resume), signaling, the peers without a channel (strict NAT)
+```
+
+* **A direct client** (both channels up) sends everything to the host: its state on `zb-fast`, its RPC / INST / DESTROY / REMOVE_RPCS / DESTROY_PLAYER on `zb-rel`. Its WebSocket only carries the relay ping (every 10 s), visibility and the keepalive (`zbka`, answered by the runtime).
+* **The host** applies what a direct client sends (same checks as the relay: own view ids, valid RPC modes) and passes it on: over `zb-rel` / `zb-fast` to the other direct clients (sender id and clock of the original client), through the relay with `C_FWD` to everybody else. Its own RPC / INST / DESTROY go over `zb-rel` to direct clients and through the relay only when a client without a channel needs them; **every buffered operation still goes to the relay** (with `C_SKIP` the relay keeps it in its buffer but does not forward it to the direct clients, who already have it; it still sends them the `S_SEQ`, so a resume does not replay it). The killmebuffered echo filter of the relay exists on the host too (`KillGate`), so passing kills on cannot start the N^2 echo storm.
+* **Paths are decided by the sender, per peer** ("link"): `Ws -> Fencing -> Dc`. When the reliable channel is up the sender puts `C_FENCE` on the WebSocket and holds what it has for that peer; the relay delivers `S_FENCE` after everything sent before it, the receiver answers `FENCE_ACK` over the channel, then the held messages go over the channel. So nothing sent over the relay can be overtaken by the channel. No ack in 4 s: the held messages go through the relay, retry after 10 s.
+* **Sequence numbers, acks, fallback:** every `zb-rel` message (`u32 first seq` + items) is numbered per link; the receiver acks (every 100 ms) and drops duplicates. When the channel goes down (probe watchdog 1.5 s, closed, cannot drain 4 MB, 30000 unacked) the link goes back to `Ws` and every unacknowledged message is sent again through the relay, tagged with its number (`C_FWD only=client + tag` from the host, `C_UP` from a client); the receiver drops the ones it already got (`S_TAG`). Retry after 5 s through a new fence. During a WebSocket reconnect those resends wait for the resume.
+* **WebSocket flush rate:** host 15 Hz, but 2 Hz while every client is direct; clients 10 Hz, 1 Hz while direct.
+* **Mixed rooms:** a client without a channel (`?p2p=0`, strict NAT, more than 8 channel peers) plays exactly as before: its frames go to the relay, which forwards them to everybody (direct clients too); what it needs from direct clients comes from the host's `C_FWD`. Its presence raises the host back to 15 Hz.
+* **Switches:** `?p2p=0` (no channels at all, as before phase 2), `?rel=0` (phase 2 behaviour: only host to client state on the channel).
+* **Stats:** `StatsDump` `p2p.direct` (per link: path 0 Ws / 1 Fencing / 2 Dc, sent / received, unacked, resent, duplicates; gateway counters) and `p2p.inst` (instantiates sent / received by group on any path); the F3 link line shows `DC+rel` for a direct peer.
+* **Tests:** `server/test/relay.test.mjs` (C_SKIP, C_FWD incl. ownership / clock / bookkeeping / tags, C_UP, C_FENCE, S_SEQ for skipped clients, resume counts), `server/test/e2e/direct.mjs` (host + direct client + `?p2p=0` client + direct late joiner: bullets and health both ways, WebSocket frames, stalled channel -> relay -> back, resume while direct), plus the existing `e2e.mjs`, `fallback.mjs`, `reconnect.mjs`, `hostplus.mjs`, `host.mjs`.
+* **Limits / not done:** still no TURN (strict NAT players stay on the relay and cost 10 frames/s each). Ordering between a direct client's messages that the host passes on and the host's own reactions is "pass on first, then apply". Messages a direct client sent over a channel that died together with its WebSocket and never came back within the grace are lost like any unbuffered message during an outage. Real-world NAT success is still unmeasured (`p2p-stat` log lines).
 
 ## Getting into a game (phase 3)
 
@@ -333,11 +362,49 @@ The page template checks the user agent (Android / iPhone / iPad / Mobile ...), 
   Real-item share 50 %, zombie backpack 10 %, and grenades (`grenadeground`, `stickgrenadeground`, weight 20 each of 170) join the random item list; they are ordinary `sc_canbetaken` ground items (same pickup as every other item, `grabitem` -> `receiveitem`) and are in the network prefab table, so clients see them.
 * Tests: `server/test/e2e/playtest.mjs` (timer advance with zombies left, timer re-armed, Classic unchanged, HUD wave value, teammates' health live / dead / leave, zombie scaling 1 vs 2 players vs Classic, zombie backlog: queued with their wave at a lowered cap, nothing lost, spawns gradually when there is room, each with its wave's life, a wave with queued zombies is not cleared, the frame rate guard holds the backlog at 50 alive and releases it, client HUD numbers, Classic cap 50 and no backlog; loot numbers for 1 / 2 players and Classic, grenade spawns and is picked up). Test hooks: `DebugZmax(n)` (ceiling), `DebugZGuard(-1|0|1)` (guard automatic / off / forced), DebugDump `queued`, `qwaves`, `zcap`, `guard`, `zhist` (zombies by life), `mdalive` / `mdqueued`.
 
+## Free plan budget (2026-10-11)
+
+**Incident:** on 2026-10-10 the account used up the Workers Free plan's Durable Object requests: 1,259,685 Durable Object requests in the analytics that day (49,375 the day before, 1.8 M outgoing WebSocket messages, which are free), from about 31 real matches (two players for 4+ hours, up to 300 zombies) plus our own live test runs. From about 23:00 UTC every Durable Object call failed with "Exceeded allowed volume of requests in Durable Objects free tier.", so `/api/rooms` / `/api/quickplay` / joins answered 1101 and players only saw "You left the game, You got 0 $". It resets at 00:00 UTC.
+
+**What counts:** 100,000 requests a day: HTTP requests and RPC calls to an object (every Lobby / Room call from the Worker, every `/api/ping`, `/api/room`), alarms, WebSocket upgrades, and incoming WebSocket messages at 20:1. The analytics `requests` field counts raw messages (Room 1,247,656 + Lobby 12,029 that day); the limit tripped at about 1.17-1.26 M raw, about 74 k by the documented formula, so the real allowance is a bit lower than the formula suggests. Below, budgets use **~1.2 M incoming WebSocket messages a day** (what was observed), not the nominal 2 M. Outgoing messages, bytes and (with hibernation) idle time are not the problem: the active time that day was ~20 min of wall clock in total.
+
+**Measured** (local relay, `server/test/e2e/budget.mjs`: host + 1 client, both kept alive, zombies lifted with `DebugZmax`, 10 s windows, frames the two pages send = what the Durable Object receives; headless Chrome on one Mac runs the game at ~25-35 fps, the frame-based numbers of the old build are higher at 60 fps):
+
+| WebSocket frames/s into the Durable Object, 2-player room | 72 zombies | 157 | 330 |
+|---|---|---|---|
+| before, WebRTC lane up (host / client) | 34.5 (14.1 / 20.4) | 31.0 (14.6 / 16.4) | 47.2 (26.3 / 20.9) |
+| before, `?p2p=0` | 59.5 (34.8 / 24.7) | 68.3 (43.9 / 24.4) | 50.7 (31.2 / 19.5) |
+| 2a: fixed-rate batching (lane up) | 20.0 (10 / 10) | 23.8 (13.8 / 10) | 24.8 (14.8 / 10) |
+| 2a, `?p2p=0` | 25 (15 / 10) | 25 (15 / 10) | 25 (15 / 10) |
+| 2b: both channels, host gateway | 2.1 (1.8 / 0.3) | 2.3 (2.0 / 0.3) | 2.3 (2.0 / 0.3) |
+| 2b, `?p2p=0` (same as 2a) | 25 | 25 | 25 |
+
+Split before the fix (lane up): the host's frames were RPC frames (zombie animations `fadeanim`, `hurtme`, `spillblood`, `playzombiesound`, wave timer / health syncs, almost none buffered, plus 3-13 INST/s), one frame per rendered frame; the client's were its own state (20 Hz). Without the lane the host's frames also carried 1.4-5.8 k state messages/s, but the frame count was what mattered.
+
+**Player-hours a day** (budget ~1.2 M messages; fixed costs per room on top of the frames: an alarm every 40 s and, for listed rooms, a lobby refresh every 75 s, each worth 20 messages, together ~0.8 messages/s; joins, list views, pings a little more):
+
+| | messages/s per 2-player room | per player-hour | player-hours/day |
+|---|---|---|---|
+| before (60 fps host + 25/s client, as live) | ~85 | ~150 k | **~8** |
+| before (measured locally, ~30 fps) | ~40 | ~72 k | ~17 |
+| 2a (deployed 2026-10-11 12:51 UTC) | 25 + 0.8 | ~46 k | **~26** |
+| 2b, every client direct | 2.3 + 0.8 | ~5.6 k | **~215** |
+| 2b, 4-player room, all direct | ~2.9 + 0.8 (host 2, clients 0.3 each) | ~3.3 k | **~360** |
+| a player without a direct channel (strict NAT), any build | +10 (and the host back at 15) | | |
+
+So with 2b a couple of friends can play many hours a day, and a public audience of a few dozen concurrent players fits for a few hours a day as long as most of them get a direct channel (STUN only; strict-NAT players cost like 2a). Dozens of players around the clock (~500+ player-hours a day) does not fit; past that the options are the paid plan (not allowed) or the flat-price VPS relay in ROADMAP.md.
+
+**Other changes for the budget:** keepalive `zbka` every 4.5 s of silence, answered by the runtime (`setWebSocketAutoResponse`, does not wake the object; the docs only promise no duration charge, so it is kept rare), relay ping every 10 s (was 2 s), server list pings one probe per room per 30 s for the first 6 rows (were 2 per 10 s for 8: each is a billed request), invite / host-left polling every 1.5 / 1 s (was 0.5 s), cloud-save rate limit counted in the Worker isolate instead of the Lobby, `/api/rooms` + `/api/quickplay` from a 5 s edge cache of the lobby rows (local tests bypass it unless they send `x-zb-cache: 1`), `/api/stats` cached 60 s (`/api/leaderboard` already was).
+
+**When the quota runs out anyway:** the Worker catches the Durable Object error: `/api/*` answers `503 {"error":"quota","resetAt":<next 00:00 UTC>}`, a socket gets `REJECT 11` (a normal socket, the browser cannot read a failed upgrade). The game shows "Online servers are full for today (free limit). Single player works; online is back at HH:MM (your local time)" (state 37, the local time of the next 00:00 UTC from the browser) with Play alone / Main menu, keeps the match money when a running match is cut off, and marks the server list. Single player never needs a Durable Object (`/api/run` / `/api/score` are D1, profile calls fail open). Test: `server/test/e2e/quota.mjs` (cookie `zbquota=1` simulates it with `npm run dev:test`).
+
+**Check today's usage:** `node server/scripts/do-usage.mjs [YYYY-MM-DD]` prints the Durable Object requests per hour and per namespace (Room / Lobby) for a UTC day and a billed estimate. It uses `CLOUDFLARE_API_TOKEN` (needs Account Analytics: Read) or the OAuth token of `npx wrangler login` (run `npx wrangler whoami` first if it expired). Dashboard: Workers & Pages > Durable Objects > Metrics.
+
 ## Relay details (server/src)
 
 * `index.js`: routes `/api/rooms`, `/api/room/:code`, `/api/quickplay`, `/api/ping/:code`, `/ws/host`, `/ws/room/:code`, serves the Unity build from static assets (see Deploy in the README). It also copies the host's `colo` / `country` / `lat` / `lon` (from `request.cf`) into the room at creation; the client cannot set them.
-* `room.js`: one SQLite-backed Durable Object per room using the WebSocket Hibernation API. Players are recovered from the sockets' attachments after hibernation; the buffer is snapshotted to storage every 25 s when dirty (and re-read when the object wakes); room metadata is persisted. An alarm every 25 s heartbeats the lobby entry and closes rooms whose host socket is gone.
-* `lobby.js`: one Durable Object (`idFromName("lobby")`) with the room list. Entries expire 75 s after the last heartbeat. Only rooms whose host chose "Show in server list" appear. `list()` strips lat/lon, `quickplay(type, lat, lon)` ranks candidates (see above).
+* `room.js`: one SQLite-backed Durable Object per room using the WebSocket Hibernation API. Players are recovered from the sockets' attachments after hibernation; the buffer is snapshotted to storage every 40 s when dirty (and re-read when the object wakes); room metadata is persisted. An alarm every 40 s (earlier for grace / restart deadlines) closes rooms whose host socket is gone; the lobby entry is refreshed at once when something that matters for joining changes (players, listing, started / ended, the first wave), wave changes at most every 30 s, otherwise every 75 s (entries expire after 150 s). `setWebSocketAutoResponse("zbka")` answers keepalives without waking the object; the silence check reads its timestamp.
+* `lobby.js`: one Durable Object (`idFromName("lobby")`) with the room list. Entries expire 150 s after the last heartbeat. Only rooms whose host chose "Show in server list" appear. The Worker reads all rows with `rows()` through a 5 s edge cache and filters / ranks them itself (`publicRows`: no lat/lon; `quickplayRows(type, lat, lon)`, see above).
 * `room.js` also has the read-only RPC methods `info()` (behind `/api/room/:code`, never creates storage) and `ping()`.
 * Authorisation is minimal by design: the sender id is stamped by the relay (clients cannot impersonate), clients can only create objects with their own view-id range, only the host can kick / list / act for other players.
 * Limits: 64 KB per frame, 8 KB per message, 512 messages per frame, per connection token bucket (host 1 MB/s, clients 96 KB/s, 100 consecutive violations close the socket), 20000 buffered entries / 4 MB per room, 16 players, 250 joiners per room lifetime; per IP request limits, see "Limits (step 1)" under Resilience.

@@ -716,5 +716,98 @@ await test("budget: the room list is cached at the edge for a few seconds (x-zb-
   assert.equal(r1.headers.get("x-zb-cached"), "0"); assert.equal(r2.headers.get("x-zb-cached"), "1"); assert.equal(r3.headers.get("x-zb-cached"), "1", "Quick Play reads the same cached rows");
 });
 
+// ---- phase 2b: direct clients (the host is their gateway over the data channel), docs/MULTIPLAYER.md "Data channel lane" ------------------
+const le32 = (v) => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, v, true); return b; };
+const cat = (...parts) => { let n = 0; for (const p of parts) n += p.length; const o = new Uint8Array(n); let k = 0; for (const p of parts) { o.set(p, k); k += p.length; } return o; };
+const skipMsg = (...ids) => cat(new Uint8Array([21, ids.length]), ...ids.map(le32));
+const fwd = (as, only, flags, inner, stampV, tagV) => cat(new Uint8Array([22]), le32(as), le32(only), new Uint8Array([flags]), flags & 2 ? le32(stampV) : new Uint8Array(0), flags & 4 ? le32(tagV) : new Uint8Array(0), inner);
+const fence = (target, id) => cat(new Uint8Array([23]), le32(target), le32(id));
+const up = (tagV, inner) => cat(new Uint8Array([24]), le32(tagV), inner);
+const senderOf = (m) => dv(m).getInt32(1, true);
+
+await test("2b: C_SKIP: the host's messages are not forwarded to its direct clients (they get them over the channel); late joiners still get the buffer", async () => {
+  const { h, code } = await host("&max=4");
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code); await b.take(0x8a); await h.take(0x85);
+  h.send(skipMsg(1));
+  const V = view(0, 7), S = SCENE(31);
+  h.send(stamp(1), rpc(1, S, "others"), inst(V, 3), rpc(6, V, "buffered"), state(1, S, 14));
+  await b.take(0x83); await b.take(0x82); await b.take(0x82); await b.take(0x8d);
+  await a.none(0x82, 300); assert.equal(a.count(0x83), 0, "no INST for the direct client");
+  assert.equal(a.count(0x8d), 1, "state is not affected by C_SKIP (it has its own dc flag)");
+  const c = await join(code); await h.take(0x85);
+  await c.take(0x83); const rb = await c.take(0x82); assert.equal(td.decode(rb.subarray(15, 15 + rb[14])), "buffered");
+  h.send(skipMsg()); h.send(rpc(1, S, "again")); await a.take(0x82);
+  [h, a, b, c].forEach((x) => x.close());
+});
+
+await test("2b: C_FWD: the host passes on a direct client's messages (sender stamped as that client, its clock, ownership checked, bookkeeping by flag)", async () => {
+  const { h, code } = await host("&max=5");
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code); await b.take(0x8a); await h.take(0x85);
+  const c = await join(code); await c.take(0x8a); await h.take(0x85);
+  h.send(skipMsg(3)); // c is direct too: forwarded messages skip it
+  b.frames.length = 0; h.frames.length = 0;
+  h.send(stamp(9), fwd(1, -1, 2, rpc(1, SCENE(5), "fromA"), 4242));
+  const m = await b.take(0x82); assert.equal(senderOf(m), 1, "sender is the client, not the host");
+  const f = b.frames.find((fr) => fr.some((x) => x[0] === 0x82)); const t = f.find((x) => x[0] === 0x8b);
+  assert.ok(t && dv(t).getInt32(1, true) === 1 && dv(t).getUint32(5, true) === 4242, "S_TIME with the client's id and clock");
+  await a.none(0x82, 200); await c.none(0x82, 50); await h.none(0x82, 50);
+  // buffered: kept for late joiners with the client as sender; someone else's view id is refused
+  h.send(fwd(1, -1, 1, inst(view(1, 9), 4)), fwd(1, -1, 1, inst(view(2, 9), 4)));
+  const i1 = await b.take(0x83); assert.equal(senderOf(i1), 1); await sleep(200); assert.equal(b.count(0x83), 0, "only the client's own view ids");
+  const d = await join(code); await h.take(0x85); const di = await d.take(0x83); assert.equal(senderOf(di), 1); await d.take(0x8a); assert.equal(d.count(0x83), 0);
+  // targeted resend (only + tag): exactly that client, even if skipped, tagged with the sequence number and the original sender; never buffered
+  h.send(fwd(0, 3, 4, rpc(1, SCENE(5), "resend"), 0, 77));
+  const tg = await c.take(0x98); assert.equal(dv(tg).getUint32(1, true), 77); assert.equal(dv(tg).getInt32(5, true), 0); await c.take(0x82);
+  await b.none(0x82, 200);
+  // state: C_FWD state skips the clients whose dc flag is set, not the C_SKIP ones
+  h.send(fwd(1, -1, 2, state(2, view(1, 1), 28), 5)); await b.take(0x8d); await c.take(0x8d); await d.take(0x8d); await a.none(0x8d, 100);
+  // only the host may forward
+  a.send(fwd(2, -1, 0, rpc(1, SCENE(5), "fake"))); await b.none(0x82, 300);
+  [h, a, b, c, d].forEach((x) => x.close());
+});
+
+await test("2b: C_UP goes to the host only, tagged with the client's id; C_FENCE becomes S_FENCE (clients may only fence the host)", async () => {
+  const { h, code } = await host("&max=4");
+  const a = await join(code); await a.take(0x8a); await h.take(0x85);
+  const b = await join(code); await b.take(0x8a); await h.take(0x85);
+  a.send(up(12, rpc(1, SCENE(6), "lost")), up(13, inst(view(1, 3), 2)));
+  const t1 = await h.take(0x98); assert.equal(dv(t1).getUint32(1, true), 12); assert.equal(dv(t1).getInt32(5, true), 1);
+  const r = await h.take(0x82); assert.equal(senderOf(r), 1); await h.take(0x98); await h.take(0x83);
+  await b.none(0x82, 300); assert.equal(b.count(0x83), 0);
+  const c = await join(code); await h.take(0x85); await c.take(0x8a); assert.equal(c.count(0x83), 0, "C_UP is never buffered (the host books it with C_FWD)");
+  h.send(skipMsg(1)); h.send(fence(1, 5));
+  const f = await a.take(0x97); assert.equal(senderOf(f), 0); assert.equal(dv(f).getUint32(5, true), 5);
+  a.send(fence(0, 6)); const g = await h.take(0x97); assert.equal(senderOf(g), 1);
+  a.send(fence(2, 7)); await b.none(0x97, 300);
+  [h, a, b, c].forEach((x) => x.close());
+});
+
+await test("2b: a direct client learns the sequence numbers of the host's buffered entries (S_SEQ only), so a resume does not replay them", async () => {
+  const { h, code } = await host3();
+  const a = await join3(code); await h.take(0x85); await a.c.take(0x8a);
+  h.send(skipMsg(1)); await sleep(100);
+  h.send(inst(view(0, 21), 2), rpc(6, view(0, 21), "b1"));
+  const sq = await a.c.take(0x8e); assert.equal(a.c.count(0x83), 0);
+  const seq = seqOf(sq);
+  a.c.ws.terminate(); await sleep(300);
+  const ra = await resume3(code, 1, a.tok, seq);
+  await ra.take(0x81); await ra.take(0x8a);
+  assert.equal(ra.count(0x83), 0, "nothing replayed: it had them"); assert.equal(ra.count(0x82), 0);
+  [h, ra].forEach((x) => x.close());
+});
+
+await test("2b: C_FWD with bookkeeping counts as the host's buffered operation (resume resend), without it does not", async () => {
+  const { h, code, tok } = await host3();
+  const a = await join3(code); await h.take(0x85); await a.c.take(0x8a);
+  h.send(fwd(1, -1, 1, inst(view(1, 4), 2)), fwd(1, -1, 1, rpc(6, view(1, 4), "x")), fwd(1, -1, 0, rpc(1, view(1, 4), "y")), inst(view(0, 5), 2));
+  await sleep(300);
+  h.ws.terminate(); await sleep(300);
+  const rh = new Client(`/ws/room/${code}?v=3&rejoin=0.${tok}&seq=0`); await rh.opened;
+  const w = parseWelcome(await rh.take(0x81)); assert.equal(w.ext.flags & 1, 1); assert.equal(w.ext.accepted, 3);
+  [rh, a.c].forEach((x) => x.close());
+});
+
 console.log(`${ok} tests passed`);
 process.exit(process.exitCode || 0);
