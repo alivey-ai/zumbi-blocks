@@ -10,7 +10,7 @@ Bringing the original **Zumbi Blocks** (AdrianKS, 2013, Kongregate / Y8) back to
 - `original/zumbiblocks.html` — the original embed page.
 
 ## Rights
-The game and its assets belong to Adrian (AdrianKS, now making Zumbi Blocks 2). On 2026-10-09 Adrian gave Vito permission to host this revival publicly with multiplayer (keep full credit to him + link to Zumbi Blocks 2). Keep a copy of his reply in `docs/permission/`.
+The game and its assets belong to Adrian (AdrianKS, now making Zumbi Blocks 2). On 2026-10-09 Adrian gave Vito permission to host this revival publicly with multiplayer (keep full credit to him + link to Zumbi Blocks 2). Keep a copy of his reply in `docs/permission/`. On 2026-10-12, on a call with Vito, Adrian agreed to the project being open source on GitHub. The original game, its assets and the recovered code remain Adrian's work; the revival code (WebGL port, multiplayer, server) is by Vito. Play Zumbi Blocks 2: https://store.steampowered.com/app/1941780/
 
 ## Status
 1. Recovered the project from the bundle (AssetRipper) into the `game/` Unity project (`docs/RECOVERY.md`).
