@@ -1,5 +1,7 @@
 # Zumbi Blocks — web revival
 
+**▶ Play: https://zumbi-blocks-classic.vitosenic.com** (desktop browser; single player + online multiplayer)
+
 Bringing the original **Zumbi Blocks** (AdrianKS, 2013, Kongregate / Y8) back to the browser: first single player via Unity WebGL, then real online multiplayer.
 
 ## Source
